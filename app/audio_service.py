@@ -57,7 +57,7 @@ TIDAL_APIS = [
 class AudioService:
     """Service for fetching and transcoding audio."""
     
-    # Tidal credentials (same as SpotiFLAC)
+    # Tidal credentials
     TIDAL_CLIENT_ID = base64.b64decode("NkJEU1JkcEs5aHFFQlRnVQ==").decode()
     TIDAL_CLIENT_SECRET = base64.b64decode("eGV1UG1ZN25icFo5SUliTEFjUTkzc2hrYTFWTmhlVUFxTjZJY3N6alRHOD0=").decode()
 
@@ -652,8 +652,8 @@ class AudioService:
             logger.error(f"Metadata extraction error: {e}")
             return {}
     
-    async def fetch_flac(self, isrc: str, query: str = "", hires: bool = True) -> Optional[Union[tuple[bytes, Dict], tuple[str, Dict]]]:
-        """Fetch FLAC audio and metadata from Tidal or Deezer (with fallback)."""
+    async def fetch_flac(self, isrc: str, query: str = "", hires: bool = True, hires_quality: str = "6") -> Optional[Union[tuple[bytes, Dict], tuple[str, Dict]]]:
+        """Fetch FLAC audio and metadata from Qobuz, Dab, Tidal, or Deezer (with fallback)."""
         
         deezer_info = None  # Cache for potential metadata use
         
@@ -688,8 +688,51 @@ class AudioService:
             logger.info(f"ListenBrainz track - searching by query: {query}")
         
         
-        # 0. Try Dab Music (Qobuz Hi-Res Proxy) - New! Priority #1
-        try:
+        # 0. Try Qobuz via squid.wtf (Hi-Res source, no auth needed) - Priority #0
+        if hires:
+          try:
+            from app.qobuz_service import qobuz_service
+            
+            qobuz_track = None
+            qobuz_query = query
+            
+            if qobuz_query:
+                qobuz_tracks = await qobuz_service.search_tracks(qobuz_query, limit=1)
+                if qobuz_tracks:
+                    qobuz_track = qobuz_tracks[0]
+                    logger.info(f"Qobuz search hit: {qobuz_track.get('name')} by {qobuz_track.get('artists')}")
+            
+            if qobuz_track:
+                qobuz_id = qobuz_track.get('id', '').replace('qobuz_', '')
+                stream_url = await qobuz_service.get_stream_url(qobuz_id, quality=hires_quality)
+                
+                if stream_url:
+                    logger.info(f"Qobuz stream URL found (quality={hires_quality}): {stream_url[:40]}...")
+                    metadata = {
+                        "title": qobuz_track.get("name"),
+                        "artists": qobuz_track.get("artists"),
+                        "album": qobuz_track.get("album"),
+                        "year": qobuz_track.get("release_date", "")[:4] if qobuz_track.get("release_date") else "",
+                        "album_art_url": qobuz_track.get("album_art"),
+                        "album_art_data": None,
+                        "is_hi_res": True
+                    }
+                    # Download album art if URL is present
+                    if metadata.get("album_art_url"):
+                        try:
+                            art_resp = await self.client.get(metadata["album_art_url"])
+                            if art_resp.status_code == 200:
+                                metadata["album_art_data"] = art_resp.content
+                                logger.info("Downloaded album art from Qobuz")
+                        except Exception as e:
+                            logger.debug(f"Failed to download Qobuz album art: {e}")
+                    return (stream_url, metadata)
+          except Exception as e:
+            logger.error(f"Qobuz fetch error: {e}")
+
+        # 0b. Try Dab Music (Qobuz Hi-Res Proxy) - Only when Hi-Res is enabled
+        if hires:
+          try:
             from app.dab_service import dab_service
             
             dab_id = None
@@ -719,7 +762,7 @@ class AudioService:
             
             if dab_id:
                 # Select quality
-                quality = "27" if hires else "7"
+                quality = hires_quality
                 stream_url = await dab_service.get_stream_url(dab_id, quality=quality)
                 
                 if stream_url:
@@ -763,7 +806,7 @@ class AudioService:
 
                     metadata["is_hi_res"] = True
                     return (stream_url, metadata)
-        except Exception as e:
+          except Exception as e:
             logger.error(f"Dab Music fetch error: {e}")
 
         # 1. Try Tidal (Primary Source)
@@ -1040,7 +1083,7 @@ class AudioService:
             
 
     
-    async def get_download_audio(self, isrc: str, query: str, format: str = "mp3", track_number: Optional[int] = None, provided_metadata: Optional[Dict] = None) -> Optional[tuple]:
+    async def get_download_audio(self, isrc: str, query: str, format: str = "mp3", track_number: Optional[int] = None, provided_metadata: Optional[Dict] = None, hires: bool = False, hires_quality: str = "6") -> Optional[tuple]:
         """Get audio in specified format for download. Returns (data, extension, mime_type)."""
         
         config = self.FORMAT_CONFIG.get(format, self.FORMAT_CONFIG["mp3"])
@@ -1058,7 +1101,7 @@ class AudioService:
              # ... (existing link handling)
              return None # Todo: handle link tagging similarly if possible
         
-        result = await self.fetch_flac(isrc, query)
+        result = await self.fetch_flac(isrc, query, hires=hires, hires_quality=hires_quality)
         
         if not result:
             return None

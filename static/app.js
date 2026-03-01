@@ -25,6 +25,7 @@ const state = {
     scrobbledCurrent: false, // Track if current song was scrobbled
     listenBrainzConfig: { valid: false, username: null }, // LB status
     hiResMode: localStorage.getItem('freedify_hires') !== 'false', // Hi-Res 24-bit mode (Default True)
+    hiResQuality: localStorage.getItem('freedify_hires_quality') || '6', // '6'=96kHz/24bit, '5'=192kHz/24bit
     sortOrder: 'newest', // 'newest' or 'oldest' for album sorting
     lastSearchResults: [], // Store last search results for re-rendering
     lastSearchType: 'track', // Store last search type
@@ -651,8 +652,31 @@ function renderPlaylistsView() {
         `;
     });
     
-    resultsContainer.innerHTML = '';
+    const headerHtml = `
+        <div class="playlists-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h2>Your Playlists</h2>
+            <div class="playlists-actions">
+                <button id="import-playlist-btn" class="btn-secondary" style="padding: 8px 16px;">📥 Import Playlist</button>
+                <input type="file" id="playlist-import-input" accept=".m3u,.m3u8,.csv,.json" class="hidden">
+            </div>
+        </div>
+    `;
+    
+    resultsContainer.innerHTML = headerHtml;
     resultsContainer.appendChild(grid);
+    
+    // Bind import button
+    const importBtn = document.getElementById('import-playlist-btn');
+    const importInput = document.getElementById('playlist-import-input');
+    
+    if (importBtn && importInput) {
+        importBtn.addEventListener('click', () => importInput.click());
+        importInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handlePlaylistImport(file);
+            e.target.value = ''; // Reset input
+        });
+    }
     
     // Click handlers
     grid.querySelectorAll('.playlist-item').forEach(el => {
@@ -1233,7 +1257,9 @@ downloadConfirmBtn.addEventListener('click', async () => {
         const ext = format === 'alac' ? 'm4a' : format.replace(/_24$/, '');
         const filename = `${track.artists} - ${track.name}.${ext}`.replace(/[\\/:"*?<>|]/g, "_");
         
-        const response = await fetch(`/api/download/${isrc}?q=${encodeURIComponent(query)}&format=${format}&filename=${encodeURIComponent(filename)}`);
+        const hiresParam = state.hiResMode ? '&hires=true' : '&hires=false';
+        const qualityParam = state.hiResMode ? `&hires_quality=${state.hiResQuality}` : '';
+        const response = await fetch(`/api/download/${isrc}?q=${encodeURIComponent(query)}&format=${format}&filename=${encodeURIComponent(filename)}${hiresParam}${qualityParam}`);
         
         if (!response.ok) {
             const err = await response.json();
@@ -1266,12 +1292,16 @@ downloadConfirmBtn.addEventListener('click', async () => {
 function renderTrackCard(track) {
     const year = track.release_date ? track.release_date.slice(0, 4) : '';
     const isStarred = isInLibrary(track.id);
-    // Use horizontal list item layout
+    
+    // Check for HiRes quality
+    const isHiRes = track.is_hi_res || track.is_hires || track.audio_quality?.isHiRes || false;
+    const hiResBadge = isHiRes ? '<span class="hires-badge">HI-RES</span>' : '';
+
     return `
         <div class="track-item" data-id="${track.id}">
             <img class="track-album-art" src="${track.album_art || '/static/icon.svg'}" alt="${escapeHtml(track.name)}" loading="lazy">
             <div class="track-info">
-                <div class="track-name">${escapeHtml(track.name)}</div>
+                <div class="track-name">${hiResBadge}${escapeHtml(track.name)}</div>
                 <div class="track-artist">${escapeHtml(track.artists)}</div>
             </div>
             <span class="track-duration">${track.duration_ms ? formatTime(track.duration_ms / 1000) : (track.duration && track.duration.toString().includes(':') ? track.duration : formatTime(track.duration))}</span>
@@ -1287,7 +1317,7 @@ function renderAlbumCard(album) {
     const year = (album.release_date && album.release_date.length >= 4) ? album.release_date.slice(0, 4) : '';
     const trackCount = album.total_tracks ? `${album.total_tracks} tracks` : '';
     // Check for HiRes quality (if available from API)
-    const isHiRes = album.audio_quality?.isHiRes || album.is_hires || false;
+    const isHiRes = album.is_hi_res || album.is_hires || album.audio_quality?.isHiRes || false;
     const hiResBadge = isHiRes ? '<span class="hires-badge">HI-RES</span>' : '';
     
     return `
@@ -2200,7 +2230,8 @@ async function loadTrack(track) {
         player.src = track.src;
     } else {
         const hiresParam = state.hiResMode ? '&hires=true' : '&hires=false';
-        player.src = `/api/stream/${track.isrc || track.id}?q=${encodeURIComponent(track.name + ' ' + track.artists)}${hiresParam}`;
+        const qualityParam = state.hiResMode ? `&hires_quality=${state.hiResQuality}` : '';
+        player.src = `/api/stream/${track.isrc || track.id}?q=${encodeURIComponent(track.name + ' ' + track.artists)}${hiresParam}${qualityParam}`;
     }
     
     try {
@@ -2733,7 +2764,8 @@ function preloadNextTrack() {
     
     const query = `${nextTrack.name} ${nextTrack.artists}`;
     const hiresParam = state.hiResMode ? '&hires=true' : '&hires=false';
-    const streamUrl = `/api/stream/${nextTrack.isrc || nextTrack.id}?q=${encodeURIComponent(query)}${hiresParam}`;
+    const qualityParam = state.hiResMode ? `&hires_quality=${state.hiResQuality}` : '';
+    const streamUrl = `/api/stream/${nextTrack.isrc || nextTrack.id}?q=${encodeURIComponent(query)}${hiresParam}${qualityParam}`;
     
     // Load into the inactive player for gapless transition
     const inactivePlayer = activePlayer === 1 ? audioPlayer2 : audioPlayer;
@@ -4300,8 +4332,14 @@ function updateHifiButtonUI() {
             // If state.hiResMode is false -> Remove class 'hi-res' -> CSS makes it Green
             hifiBtn.classList.toggle('hi-res', state.hiResMode);
             
-            hifiBtn.title = state.hiResMode ? "Hi-Res Mode ON (24-bit)" : "HiFi Mode ON (16-bit)";
-            hifiBtn.textContent = state.hiResMode ? "Hi-Res" : "HiFi";
+            if (state.hiResMode) {
+                const qualityLabel = state.hiResQuality === '5' ? '192kHz/24-bit' : '96kHz/24-bit';
+                hifiBtn.title = `Hi-Res Mode ON (${qualityLabel})`;
+                hifiBtn.textContent = state.hiResQuality === '5' ? 'Hi-Res+' : 'Hi-Res';
+            } else {
+                hifiBtn.title = 'HiFi Mode ON (16-bit)';
+                hifiBtn.textContent = 'HiFi';
+            }
         }
     }
 }
@@ -4309,14 +4347,25 @@ function updateHifiButtonUI() {
 // Toggle HiFi mode
 if (hifiBtn) {
     hifiBtn.addEventListener('click', () => {
-        state.hiResMode = !state.hiResMode;
+        // Cycle: HiFi (16-bit) → Hi-Res 96/24 → Hi-Res 192/24 → HiFi
+        if (!state.hiResMode) {
+            // HiFi → Hi-Res 96/24
+            state.hiResMode = true;
+            state.hiResQuality = '6';
+            showToast('💎 Hi-Res Mode ON — 96kHz / 24-bit', 3000);
+        } else if (state.hiResQuality === '6') {
+            // Hi-Res 96/24 → Hi-Res 192/24
+            state.hiResQuality = '5';
+            showToast('💎 Hi-Res MAX — 192kHz / 24-bit', 3000);
+        } else {
+            // Hi-Res 192/24 → HiFi
+            state.hiResMode = false;
+            state.hiResQuality = '6';
+            showToast('🎵 HiFi Mode ON — 16-bit Audio', 3000);
+        }
         localStorage.setItem('freedify_hires', state.hiResMode);
+        localStorage.setItem('freedify_hires_quality', state.hiResQuality);
         updateHifiButtonUI();
-        
-        // Show toast notification
-        showToast(state.hiResMode ? 
-            '💎 Hi-Res Mode ON - 24-bit Audio' : 
-            '🎵 HiFi Mode ON - 16-bit Audio', 3000);
     });
     
     // Initialize UI on load
@@ -5243,27 +5292,71 @@ if (loadMoreBtn) {
 // ========== LISTENBRAINZ LOGIC ==========
 // Scrobble Logic
 async function submitNowPlaying(track) {
-    if (!state.listenBrainzConfig.valid) return;
-    try {
-        await fetch('/api/listenbrainz/now-playing', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(track)
-        });
-    } catch (e) { console.error('Now playing error:', e); }
+    // ListenBrainz
+    if (state.listenBrainzConfig.valid) {
+        try {
+            await fetch('/api/listenbrainz/now-playing', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(track)
+            });
+        } catch (e) { console.error('LB Now playing error:', e); }
+    }
+    // Last.fm
+    const lfmSession = localStorage.getItem('lastfm_session_key');
+    if (lfmSession) {
+        try {
+            await fetch('/api/lastfm/nowplaying', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    session_key: lfmSession,
+                    artist: track.artists || '',
+                    track: track.name || '',
+                    album: track.album || ''
+                })
+            });
+        } catch (e) { console.error('Last.fm now playing error:', e); }
+    }
 }
 
 async function submitScrobble(track) {
-    if (!state.listenBrainzConfig.valid || state.scrobbledCurrent) return;
-    try {
-        state.scrobbledCurrent = true; // Prevent double scrobble
-        await fetch('/api/listenbrainz/scrobble', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(track)
-        });
-        console.log('Scrobbled:', track.name);
-    } catch (e) { console.error('Scrobble error:', e); }
+    const lbValid = state.listenBrainzConfig.valid;
+    const lfmSession = localStorage.getItem('lastfm_session_key');
+    
+    if ((!lbValid && !lfmSession) || state.scrobbledCurrent) return;
+    
+    state.scrobbledCurrent = true; // Prevent double scrobble
+    
+    // ListenBrainz scrobble
+    if (lbValid) {
+        try {
+            await fetch('/api/listenbrainz/scrobble', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(track)
+            });
+            console.log('LB Scrobbled:', track.name);
+        } catch (e) { console.error('LB Scrobble error:', e); }
+    }
+    
+    // Last.fm scrobble
+    if (lfmSession) {
+        try {
+            await fetch('/api/lastfm/scrobble', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    session_key: lfmSession,
+                    artist: track.artists || '',
+                    track: track.name || '',
+                    album: track.album || '',
+                    timestamp: Math.floor(Date.now() / 1000)
+                })
+            });
+            console.log('Last.fm Scrobbled:', track.name);
+        } catch (e) { console.error('Last.fm Scrobble error:', e); }
+    }
 }
 
 // Check initial LB status
@@ -5274,6 +5367,120 @@ fetch('/api/listenbrainz/validate')
         if (data.valid) console.log('ListenBrainz connected:', data.username);
     })
     .catch(console.error);
+
+// ========== LAST.FM AUTH & UI ==========
+(function initLastFM() {
+    const lfmUsername = localStorage.getItem('lastfm_username');
+    const lfmSessionKey = localStorage.getItem('lastfm_session_key');
+    
+    // Use the Last.fm button in the More menu
+    const lfmBtn = document.getElementById('lastfm-menu-btn');
+    if (lfmBtn) {
+        // Update button text based on connection state
+        if (lfmSessionKey) {
+            lfmBtn.textContent = `🎵 Last.fm: ${lfmUsername || 'Connected'}`;
+            lfmBtn.classList.add('lastfm-connected');
+        } else {
+            lfmBtn.textContent = '🎵 Connect Last.fm';
+        }
+        
+        lfmBtn.addEventListener('click', () => {
+            // Close the More menu
+            document.getElementById('search-more-menu')?.classList.add('hidden');
+            
+            if (localStorage.getItem('lastfm_session_key')) {
+                // Already connected — show disconnect option
+                if (confirm(`Connected as ${localStorage.getItem('lastfm_username') || 'Unknown'}.\nDisconnect from Last.fm?`)) {
+                    localStorage.removeItem('lastfm_session_key');
+                    localStorage.removeItem('lastfm_username');
+                    lfmBtn.textContent = '🎵 Connect Last.fm';
+                    lfmBtn.classList.remove('lastfm-connected');
+                    showToast('Disconnected from Last.fm');
+                }
+            } else {
+                // Start auth flow
+                connectLastFM();
+            }
+        });
+    }
+    
+    // Hook up Import Playlist button
+    const importBtn = document.getElementById('import-playlist-menu-btn');
+    if (importBtn) {
+        importBtn.addEventListener('click', () => {
+            document.getElementById('search-more-menu')?.classList.add('hidden');
+            document.getElementById('playlist-file-input')?.click();
+        });
+    }
+    
+    // Check for pending token (fallback from redirect)
+    const pendingToken = localStorage.getItem('lastfm_pending_token');
+    if (pendingToken) {
+        localStorage.removeItem('lastfm_pending_token');
+        exchangeLastFMToken(pendingToken);
+    }
+    
+    // Listen for postMessage from auth popup
+    window.addEventListener('message', (event) => {
+        if (event.data?.type === 'lastfm-auth' && event.data.token) {
+            exchangeLastFMToken(event.data.token);
+        }
+    });
+    
+    if (lfmSessionKey) {
+        console.log('Last.fm connected:', lfmUsername);
+    }
+})();
+
+async function connectLastFM() {
+    const callbackUrl = `${window.location.origin}/lastfm-callback`;
+    try {
+        const res = await fetch(`/api/lastfm/auth-url?callback=${encodeURIComponent(callbackUrl)}`);
+        const data = await res.json();
+        if (data.url) {
+            // Open auth in popup
+            const popup = window.open(data.url, 'lastfm_auth', 'width=800,height=600,scrollbars=yes');
+            if (!popup) {
+                // Popup blocked — redirect instead
+                window.location.href = data.url;
+            }
+        }
+    } catch (e) {
+        console.error('Last.fm auth error:', e);
+        showToast('Failed to connect Last.fm');
+    }
+}
+
+async function exchangeLastFMToken(token) {
+    try {
+        const res = await fetch('/api/lastfm/callback', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({token})
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            localStorage.setItem('lastfm_session_key', data.session_key);
+            localStorage.setItem('lastfm_username', data.username);
+            
+            // Update button
+            const lfmBtn = document.getElementById('lastfm-menu-btn');
+            if (lfmBtn) {
+                lfmBtn.textContent = `🎵 Last.fm: ${data.username}`;
+                lfmBtn.classList.add('lastfm-connected');
+            }
+            
+            showToast(`🎵 Connected to Last.fm as ${data.username}`);
+            console.log('Last.fm connected:', data.username);
+        } else {
+            showToast('Last.fm authorization failed');
+        }
+    } catch (e) {
+        console.error('Last.fm token exchange error:', e);
+        showToast('Last.fm connection error');
+    }
+}
 
 async function renderRecommendations() {
     resultsSection.classList.remove('hidden');
@@ -6985,3 +7192,340 @@ concertArtistSearch?.addEventListener('keydown', (e) => {
 });
 
 console.log('Concert alerts loaded');
+
+// ==================== ARTIST BIO MODAL ====================
+const artistBioModal = $('#artist-bio-modal');
+const artistBioClose = $('#artist-bio-close');
+const artistBioOverlay = $('#artist-bio-overlay');
+const artistBioImg = $('#artist-bio-img');
+const artistBioName = $('#artist-bio-name');
+const artistBioGenres = $('#artist-bio-genres');
+const artistBioText = $('#artist-bio-text');
+const artistBioSocials = $('#artist-bio-socials');
+const artistSocialsSection = $('#artist-socials-section');
+
+function closeArtistBio() {
+    artistBioModal?.classList.add('hidden');
+}
+
+artistBioClose?.addEventListener('click', closeArtistBio);
+artistBioOverlay?.addEventListener('click', closeArtistBio);
+
+// Handle downward drag/swipe to close (simple implementation)
+const artistBioContent = $('.artist-bio-content');
+let bioStartY = 0;
+artistBioContent?.addEventListener('touchstart', e => {
+    bioStartY = e.touches[0].clientY;
+}, {passive: true});
+artistBioContent?.addEventListener('touchend', e => {
+    const endY = e.changedTouches[0].clientY;
+    if (endY - bioStartY > 100) { // Dragged down significantly
+        closeArtistBio();
+    }
+});
+
+async function showArtistBio(artistName) {
+    if (!artistName || artistName === 'Unknown' || artistName === '-') return;
+    
+    // Show modal, set loading state
+    artistBioModal?.classList.remove('hidden');
+    if (artistBioName) artistBioName.textContent = artistName;
+    if (artistBioImg) artistBioImg.src = '/static/icon.svg';
+    if (artistBioGenres) artistBioGenres.innerHTML = '';
+    if (artistBioText) {
+        artistBioText.innerHTML = '';
+        artistBioText.classList.add('loading-pulse');
+    }
+    if (artistBioSocials) artistBioSocials.innerHTML = '';
+    artistSocialsSection?.classList.add('hidden');
+    
+    try {
+        const res = await fetch(`/api/artist/${encodeURIComponent(artistName)}/bio`);
+        if (!res.ok) throw new Error('Artist not found');
+        const data = await res.json();
+        
+        artistBioText?.classList.remove('loading-pulse');
+        
+        if (data.image && artistBioImg) {
+            artistBioImg.src = data.image;
+        }
+        
+        if (data.genres && data.genres.length > 0 && artistBioGenres) {
+            artistBioGenres.innerHTML = data.genres.map(g => `<span class="genre-pill">${escapeHtml(g)}</span>`).join('');
+        }
+        
+        if (artistBioText) {
+            if (data.bio) {
+                artistBioText.innerHTML = data.bio;
+            } else {
+                artistBioText.innerHTML = '<em>No biography available.</em>';
+            }
+        }
+        
+        if (data.socials && data.socials.length > 0 && artistSocialsSection && artistBioSocials) {
+            artistSocialsSection.classList.remove('hidden');
+            artistBioSocials.innerHTML = data.socials.map(s => `
+                <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="social-link">
+                    <span class="social-icon">${s.icon}</span>
+                    <span>${escapeHtml(s.label)}</span>
+                </a>
+            `).join('');
+        }
+        
+    } catch (e) {
+        console.error('Artist bio error:', e);
+        artistBioText?.classList.remove('loading-pulse');
+        if (artistBioText) {
+            artistBioText.innerHTML = '<em>Could not load artist information.</em>';
+        }
+    }
+    
+    // Fetch similar artists
+    const similarSection = $('#artist-similar-section');
+    const similarList = $('#artist-bio-similar');
+    if (similarSection && similarList) {
+        similarSection.classList.add('hidden');
+        similarList.innerHTML = '';
+        
+        try {
+            const simRes = await fetch(`/api/lastfm/artist/${encodeURIComponent(artistName)}/similar`);
+            if (simRes.ok) {
+                const simData = await simRes.json();
+                if (simData.artists && simData.artists.length > 0) {
+                    similarSection.classList.remove('hidden');
+                    similarList.innerHTML = simData.artists.map(a => {
+                        const safeName = escapeHtml(a.name).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+                        return `
+                        <div class="similar-artist-chip" onclick="showArtistBio(this.dataset.artist)" data-artist="${safeName}">
+                            <span class="similar-artist-name">${escapeHtml(a.name)}</span>
+                        </div>
+                    `}).join('');
+                }
+            }
+        } catch (e) {
+            console.error('Similar artists error:', e);
+        }
+    }
+}
+
+// Bind clicks to dynamically open artist bio (only from player bar)
+document.addEventListener('click', (e) => {
+    const target = e.target;
+    if (
+        target.id === 'player-artist' || 
+        target.id === 'fs-artist'
+    ) {
+        e.preventDefault();
+        e.stopPropagation();
+        const artistName = target.textContent.trim();
+        showArtistBio(artistName);
+    }
+});
+
+// ==================== PLAYLIST EXPORT ====================
+const detailExportBtn = $('#detail-export-btn');
+const detailExportMenu = $('#detail-export-menu');
+const queueExportBtn = $('#queue-export-btn');
+const queueExportMenu = $('#queue-export-menu');
+
+// Toggle dropdowns
+detailExportBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    detailExportMenu.classList.toggle('hidden');
+    if (queueExportMenu) queueExportMenu.classList.add('hidden');
+});
+
+queueExportBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    queueExportMenu.classList.toggle('hidden');
+    if (detailExportMenu) detailExportMenu.classList.add('hidden');
+});
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.export-dropdown-container')) {
+        detailExportMenu?.classList.add('hidden');
+        queueExportMenu?.classList.add('hidden');
+    }
+});
+
+// Handle export option click
+document.addEventListener('click', (e) => {
+    const option = e.target.closest('.export-option');
+    if (!option) return;
+    
+    e.preventDefault();
+    const target = option.dataset.target; // 'detail' or 'queue'
+    const format = option.dataset.format; // 'm3u', 'csv', 'json'
+    
+    let tracks = [];
+    let title = 'Playlist';
+    
+    if (target === 'detail') {
+        tracks = state.detailTracks || [];
+        title = state.detailName || 'Exported_Playlist';
+    } else if (target === 'queue') {
+        tracks = state.queue || [];
+        title = 'Freedify_Queue';
+    }
+    
+    if (tracks.length === 0) {
+        showToast('No tracks to export');
+        return;
+    }
+    
+    exportPlaylist(tracks, format, title.replace(/[^a-z0-9]/gi, '_'));
+    
+    // Hide menus
+    detailExportMenu?.classList.add('hidden');
+    queueExportMenu?.classList.add('hidden');
+});
+
+function exportPlaylist(tracks, format, filename) {
+    let content = '';
+    let type = 'text/plain;charset=utf-8';
+    
+    switch (format) {
+        case 'm3u':
+            content = generateM3U(tracks);
+            type = 'audio/x-mpegurl;charset=utf-8';
+            filename += '.m3u';
+            break;
+        case 'csv':
+            content = generateCSV(tracks);
+            type = 'text/csv;charset=utf-8';
+            filename += '.csv';
+            break;
+        case 'json':
+            content = JSON.stringify(tracks, null, 2);
+            type = 'application/json;charset=utf-8';
+            filename += '.json';
+            break;
+        default:
+            return;
+    }
+    
+    triggerDownload(content, filename, type);
+    showToast(`Exported ${tracks.length} tracks to ${format.toUpperCase()}`);
+}
+
+function generateM3U(tracks) {
+    let m3u = '#EXTM3U\n';
+    tracks.forEach(track => {
+        const durationSeconds = track.duration ? Math.round(track.duration) : -1;
+        m3u += `#EXTINF:${durationSeconds},${track.artists} - ${track.name}\n`;
+        // We use ISRC as the URI if streamUrl is not immediately available
+        m3u += `freedify://track/${track.isrc || track.id}\n`;
+    });
+    return m3u;
+}
+
+function generateCSV(tracks) {
+    const escapeCSV = (str) => {
+        if (!str) return '""';
+        const cleaned = String(str).replace(/"/g, '""');
+        return `"${cleaned}"`;
+    };
+    
+    let csv = 'Name,Artist,Album,Duration(s),ISRC,Source\n';
+    tracks.forEach(track => {
+        const row = [
+            escapeCSV(track.name),
+            escapeCSV(track.artists),
+            escapeCSV(track.album),
+            track.duration || '',
+            escapeCSV(track.isrc),
+            escapeCSV(track.source)
+        ].join(',');
+        csv += row + '\n';
+    });
+    return csv;
+}
+
+function triggerDownload(content, filename, type) {
+    const blob = new Blob([content], { type: type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 100);
+}
+
+// ==================== PLAYLIST IMPORT ====================
+async function handlePlaylistImport(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    const text = await file.text();
+    let importedTracks = [];
+    
+    try {
+        if (ext === 'json') {
+            const data = JSON.parse(text);
+            importedTracks = Array.isArray(data) ? data : (data.tracks || []);
+        } else if (ext === 'm3u' || ext === 'm3u8') {
+            const lines = text.split('\n');
+            let currentTrack = {};
+            for (const line of lines) {
+                const l = line.trim();
+                if (l.startsWith('#EXTINF:')) {
+                    // Extract duration and name (format: #EXTINF:duration,Artist - Title)
+                    const parsed = l.match(/#EXTINF:(-?\d+),(.*)/);
+                    if (parsed) {
+                        currentTrack.duration = Math.max(0, parseInt(parsed[1], 10));
+                        const parts = parsed[2].split(' - ');
+                        if (parts.length >= 2) {
+                            currentTrack.artists = parts[0].trim();
+                            currentTrack.name = parts.slice(1).join(' - ').trim();
+                        } else {
+                            currentTrack.name = parsed[2].trim();
+                            currentTrack.artists = 'Unknown Artist';
+                        }
+                    }
+                } else if (l && !l.startsWith('#')) {
+                    // URI or path
+                    currentTrack.id = l.replace('freedify://track/', '') || `import_${Date.now()}_${Math.random()}`;
+                    currentTrack.isrc = currentTrack.id;
+                    if (!currentTrack.name) currentTrack.name = l.split('/').pop();
+                    importedTracks.push({...currentTrack, source: 'import'});
+                    currentTrack = {};
+                }
+            }
+        } else if (ext === 'csv') {
+            const lines = text.split('\n').filter(l => l.trim().length > 0);
+            if (lines.length > 1) { // Skip header
+                for (let i = 1; i < lines.length; i++) {
+                    const l = lines[i];
+                    // Very simple CSV parse (doesn't handle commas inside quotes well, but enough for basic use)
+                    const parts = l.split(',');
+                    if (parts.length >= 2) {
+                        importedTracks.push({
+                            id: `import_${Date.now()}_${i}`,
+                            name: parts[0].replace(/"/g, '').trim(),
+                            artists: parts[1].replace(/"/g, '').trim(),
+                            album: parts[2] ? parts[2].replace(/"/g, '').trim() : '',
+                            duration: parts[3] ? parseInt(parts[3]) : 0,
+                            isrc: parts[4] ? parts[4].replace(/"/g, '').trim() : '',
+                            source: 'import'
+                        });
+                    }
+                }
+            }
+        }
+        
+        if (importedTracks.length > 0) {
+            const baseName = file.name.replace(/\.[^/.]+$/, "");
+            createPlaylist(`Imported: ${baseName}`, importedTracks);
+            showToast(`Imported "${baseName}" with ${importedTracks.length} tracks!`);
+        } else {
+            showToast('Could not parse any tracks from this file');
+        }
+    } catch (e) {
+        console.error('Import error:', e);
+        showToast('Error parsing playlist file. Invalid format.');
+    }
+}
+

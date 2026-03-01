@@ -1,8 +1,10 @@
 # Freedify - Music Streaming Web App
 
-*Last updated: February 24, 2026*
+*Last updated: March 1, 2026*
 
 Stream music and podcasts from anywhere. **Generate smart playlists with AI**, search songs, albums, artists, podcasts or paste URLs from Spotify, SoundCloud, Bandcamp, Archive.org, Phish.in, and more.
+
+> 💖 **Support Freedify!** If you enjoy using Freedify and want to support its ongoing development and new features, please consider making a donation: **[Donate on Pally.gg](https://pally.gg/p/freedify)**. Any amount is incredibly appreciated and helps keep the music playing!
 
 > [!IMPORTANT]
 > **New to Freedify?** check out our **[Visual Deployment Guide](https://biohaphazard.github.io/Freedify/guide.html)** for easy step-by-step setup instructions (Localhost, Railway, & Render).
@@ -65,6 +67,21 @@ Open [http://localhost:8000](http://localhost:8000) and start streaming! 🎵
 - **Recommendations** - "For You" section (via **More → For You**) offers personalized tracks based on your history
 - **Stats Dashboard** - See your total scrobbles and top artists this week in the For You section
 - **Easy Setup** - Configure via `LISTENBRAINZ_TOKEN` environment variable
+
+### 🎸 Last.fm Scrobbling
+- **One-Click Connect** - Authenticate via the Last.fm popup (More → Connect Last.fm)
+- **Auto-Scrobble** - Tracks are scrobbled after 50% duration or 4 minutes
+- **Now Playing** - Real-time "Now Playing" status updates on your Last.fm profile
+- **Session Persistence** - Stay connected across page reloads
+- **Similar Artists** - Discover related artists via the Artist Bio modal (powered by Last.fm)
+
+### 🎤 Artist Bio
+- **Click to Explore** - Click the artist name in the player bar to open the bio modal
+- **Wikipedia Bio** - Artist biography pulled from Wikipedia via MusicBrainz
+- **Social Links** - Instagram, X/Twitter, Bandcamp, SoundCloud, YouTube, Spotify, and more
+- **Genres & Tags** - Top genres from MusicBrainz community tags
+- **Similar Artists** - Scrollable list of related artists (click to explore)
+- **Artist Image** - High-quality photos from fanart.tv with Wikipedia fallback
 
 ### 📝 Genius Lyrics
 - **Lyrics Modal** - Press **L** or click 📝 in player controls to view lyrics
@@ -133,6 +150,8 @@ Open [http://localhost:8000](http://localhost:8000) and start streaming! 🎵
 - **Create Playlists** - Create new playlists on the fly from the Add to Playlist modal
 - **Playlists Tab** - Click **More → Playlists** to view all saved playlists
 - **Delete Songs** - Remove individual songs from any playlist
+- **Import Playlists** - Import M3U, CSV, or JSON playlist files via **More → Import Playlist**
+- **Export Playlists** - Export any playlist or queue as M3U, CSV, or JSON via the 📤 button
 - **Google Drive Sync** - Playlists, Library, and History sync to Google Drive
 - **Local Backup** - Also stored in browser localStorage (survives restarts)
 - **Delete Playlists** - Hover over playlist and click 🗑️ to remove

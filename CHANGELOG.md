@@ -10,6 +10,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.3.0] - 2026-03-01
+
+### Added
+- **Last.fm Scrobbling** — Connect your Last.fm account to automatically scrobble tracks. Includes Now Playing updates, configurable scrobble threshold (50% or 4 minutes), and session persistence across page reloads.
+- **Artist Bio Modal** — Click the artist name in the player bar to view biography (Wikipedia), genres, social links, country, active years, and artist image (fanart.tv / Wikipedia).
+- **Similar Artists** — Artist Bio modal now shows a horizontally scrollable list of similar artists (powered by Last.fm). Click any chip to load that artist's bio.
+- **Playlist Export** — Export any playlist or queue as M3U, CSV, or JSON via the 📤 button in detail view and queue panel.
+- **Playlist Import** — Import playlists from M3U, CSV, or JSON files via **More → Import Playlist**. Tracks are automatically resolved against Deezer.
+- **Hi-Res Quality Selector** — HiFi button now cycles through 3 modes: HiFi (16-bit FLAC), Hi-Res (24-bit), and Hi-Res+ (highest available). Quality preference persists across sessions.
+- **💖 Donate** — Added donate link (Pally.gg) to the More dropdown menu and README header.
+
+### Fixed
+- **Artist Bio Auto-Popup** — Fixed bug where clicking any track in an album/playlist would trigger the Artist Bio modal (click handler was too broad, now restricted to player bar only).
+- **Artist Bio Caching** — Fixed empty biographies being permanently cached when Wikipedia extraction failed. Cache now only stores successful results.
+- **Stale Browser Cache** — Updated app.js cache buster to force browsers to load latest code after updates.
+
+### Improved
+- **XSS Hardening** — Fixed potential XSS vulnerability in Similar Artists chips where artist names with apostrophes could break inline JavaScript handlers. Now uses `data-artist` attributes.
+- **Code Cleanup** — Full audit: removed debug traceback from `artist_service.py`, dead `get_similar_tracks()` from `lastfm_service.py`, orphaned API endpoint, and stale SpotiFLAC branding in service worker.
+- **Service Worker** — Renamed from "SpotiFLAC" to "Freedify" and bumped cache version to `freedify-v7`.
+
+---
+
 ## [1.2.0] - 2026-03-01
 
 ### Improved

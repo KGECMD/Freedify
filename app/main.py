@@ -28,6 +28,8 @@ from app.dj_service import dj_service
 from app.ai_radio_service import ai_radio_service
 from app.ytmusic_service import ytmusic_service
 from app.setlist_service import setlist_service
+from app.lastfm_service import lastfm_service
+from app.artist_service import artist_service
 from app.listenbrainz_service import listenbrainz_service
 from app.jamendo_service import jamendo_service
 from app.genius_service import genius_service
@@ -180,10 +182,24 @@ async def search(
         results = []
         source = "deezer"
         
-        # 1. Try Dab Music (unless offset > 0, as Dab paging is limited/untested or we want fast fallback)
-        # Actually Dab search wrapper I wrote doesn't support offset yet (defaults limit 10).
-        # We'll use Dab for generic queries.
+        # 0. Try Qobuz (Squid.wtf) first if Hi-Res enabled
         if type in ["album", "track"] and offset == 0:
+            try:
+                from app.qobuz_service import qobuz_service
+                if type == "album":
+                    qobuz_results = await qobuz_service.search_albums(q, limit=10)
+                else:
+                    qobuz_results = await qobuz_service.search_tracks(q, limit=10)
+                
+                if qobuz_results:
+                    logger.info(f"Found {len(qobuz_results)} results on Qobuz")
+                    results = qobuz_results
+                    source = "qobuz"
+            except Exception as e:
+                logger.error(f"Qobuz search error: {e}")
+
+        # 1. Try Dab Music (fallback/alternative Hi-Res)
+        if not results and type in ["album", "track"] and offset == 0:
             try:
                 from app.dab_service import dab_service
                 if type == "album":
@@ -440,7 +456,8 @@ async def stream_audio(
     request: Request,
     isrc: str,
     q: Optional[str] = Query(None, description="Search query hint"),
-    hires: bool = Query(True, description="Prefer Hi-Res 24-bit audio")
+    hires: bool = Query(True, description="Prefer Hi-Res 24-bit audio"),
+    hires_quality: str = Query("6", description="Hi-Res quality: 5=192kHz/24bit, 6=96kHz/24bit")
 ):
     """Stream audio for a track by ISRC."""
     try:
@@ -558,7 +575,7 @@ async def stream_audio(
         
         # Standard: Fetch FLAC directly (Hifi/Hi-Res) - Skip MP3 transcoding
         # The user requested to remove non-hifi options for efficiency.
-        result = await audio_service.fetch_flac(isrc, q or "", hires=hires)
+        result = await audio_service.fetch_flac(isrc, q or "", hires=hires, hires_quality=hires_quality)
         
         if not result:
             raise HTTPException(status_code=404, detail="Could not fetch audio")
@@ -656,13 +673,15 @@ async def download_audio(
     isrc: str,
     q: Optional[str] = Query(None, description="Search query hint"),
     format: str = Query("mp3", description="Audio format: mp3, flac, aiff, wav, alac"),
-    filename: Optional[str] = Query(None, description="Filename")
+    filename: Optional[str] = Query(None, description="Filename"),
+    hires: bool = Query(False, description="Enable Hi-Res mode"),
+    hires_quality: str = Query("6", description="Hi-Res quality: 6=96kHz/24bit, 5=192kHz/24bit")
 ):
     """Download audio in specified format."""
     try:
-        logger.info(f"Download request for {isrc} in {format}")
+        logger.info(f"Download request for {isrc} in {format} (hires={hires}, quality={hires_quality})")
         
-        result = await audio_service.get_download_audio(isrc, q or "", format)
+        result = await audio_service.get_download_audio(isrc, q or "", format, hires=hires, hires_quality=hires_quality)
         
         if not result:
             raise HTTPException(status_code=404, detail="Could not fetch audio for download")
@@ -1101,6 +1120,101 @@ async def service_worker():
     if os.path.exists(sw_path):
         return FileResponse(sw_path, media_type="application/javascript")
     raise HTTPException(status_code=404)
+
+
+# ==================== LAST.FM ENDPOINTS ====================
+
+class LastFMScrobbleRequest(BaseModel):
+    session_key: str
+    artist: str
+    track: str
+    album: str = ""
+    timestamp: Optional[int] = None
+
+class LastFMNowPlayingRequest(BaseModel):
+    session_key: str
+    artist: str
+    track: str
+    album: str = ""
+
+@app.get("/api/lastfm/auth-url")
+async def lastfm_auth_url(callback: str = Query(..., description="Callback URL after authorization")):
+    """Get Last.fm authorization URL for the user to click."""
+    url = lastfm_service.get_auth_url(callback)
+    return {"url": url}
+
+@app.post("/api/lastfm/callback")
+async def lastfm_callback(data: dict):
+    """Exchange authorization token for session key."""
+    token = data.get("token")
+    if not token:
+        raise HTTPException(status_code=400, detail="Token required")
+    result = await lastfm_service.get_session(token)
+    if not result:
+        raise HTTPException(status_code=401, detail="Last.fm authorization failed")
+    return result
+
+@app.post("/api/lastfm/scrobble")
+async def lastfm_scrobble(request: LastFMScrobbleRequest):
+    """Scrobble a track to Last.fm."""
+    success = await lastfm_service.scrobble(
+        request.session_key, request.artist, request.track,
+        request.album, request.timestamp
+    )
+    return {"success": success}
+
+@app.post("/api/lastfm/nowplaying")
+async def lastfm_nowplaying(request: LastFMNowPlayingRequest):
+    """Update Now Playing on Last.fm."""
+    success = await lastfm_service.update_now_playing(
+        request.session_key, request.artist, request.track, request.album
+    )
+    return {"success": success}
+
+@app.get("/lastfm-callback")
+async def lastfm_callback_page():
+    """Serve the Last.fm callback page that captures the token."""
+    html = """
+    <!DOCTYPE html>
+    <html><head><title>Last.fm Authorization</title>
+    <style>body{background:#121212;color:#fff;font-family:Inter,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}</style>
+    </head><body>
+    <div style="text-align:center">
+        <h2>✅ Last.fm Connected!</h2>
+        <p>This window will close automatically...</p>
+    </div>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+        if (token && window.opener) {
+            window.opener.postMessage({type: 'lastfm-auth', token: token}, '*');
+            setTimeout(() => window.close(), 1500);
+        } else if (token) {
+            // Fallback: store token and redirect
+            localStorage.setItem('lastfm_pending_token', token);
+            window.location.href = '/';
+        }
+    </script>
+    </body></html>
+    """
+    return Response(content=html, media_type="text/html")
+
+@app.get("/api/lastfm/artist/{artist}/similar")
+async def lastfm_similar_artists(artist: str):
+    """Get similar artists from Last.fm."""
+    artists = await lastfm_service.get_similar_artists(artist)
+    return {"artists": artists or []}
+
+
+# ==================== ARTIST BIO ENDPOINT ====================
+
+@app.get("/api/artist/{name}/bio")
+async def get_artist_bio(name: str):
+    """Get artist biography, social links, and image."""
+    result = await artist_service.get_artist_bio(name)
+    if not result:
+        raise HTTPException(status_code=404, detail="Artist not found")
+    return result
 
 
 # ==================== LISTENBRAINZ ENDPOINTS ====================

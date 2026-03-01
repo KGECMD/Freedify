@@ -113,6 +113,10 @@
                 <button class="menu-item type-btn-menu" data-type="setlist">Setlists</button>
                 <button class="menu-item type-btn-menu" data-type="rec">For You</button>
                 <button class="menu-item type-btn-menu" data-type="favorites">Playlists</button>
+                <button class="menu-item" id="import-playlist-menu-btn">📥 Import Playlist</button>
+                <div class="menu-divider"></div>
+                <button class="menu-item" id="lastfm-menu-btn">🎵 Connect Last.fm</button>
+                <a href="https://pally.gg/p/freedify" target="_blank" rel="noopener noreferrer" class="menu-item" style="text-decoration: none; color: inherit; display: block;">💖 Donate</a>
             </div>
         </section>
 
@@ -202,6 +206,15 @@
                     <button id="shuffle-btn" class="shuffle-btn" title="Shuffle & Play">Shuffle</button>
                     <button id="queue-all-btn" class="queue-all-btn">Add All to Queue</button>
                     <button id="download-all-btn" class="download-all-btn">Download ZIP</button>
+                    
+                    <div class="export-dropdown-container">
+                        <button id="detail-export-btn" class="export-btn" title="Export Playlist">📤</button>
+                        <div id="detail-export-menu" class="export-menu hidden">
+                            <button class="export-option" data-target="detail" data-format="m3u">Export M3U</button>
+                            <button class="export-option" data-target="detail" data-format="csv">Export CSV</button>
+                            <button class="export-option" data-target="detail" data-format="json">Export JSON</button>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div id="detail-info" class="detail-info">
@@ -217,6 +230,14 @@
             <div class="queue-header">
                 <h3>Queue <span id="queue-count">(0)</span></h3>
                 <div class="queue-controls">
+                    <div class="export-dropdown-container">
+                        <button id="queue-export-btn" class="export-btn" title="Export Queue">📤</button>
+                        <div id="queue-export-menu" class="export-menu hidden">
+                            <button class="export-option" data-target="queue" data-format="m3u">Export M3U</button>
+                            <button class="export-option" data-target="queue" data-format="csv">Export CSV</button>
+                            <button class="export-option" data-target="queue" data-format="json">Export JSON</button>
+                        </div>
+                    </div>
                     <button id="queue-download-btn" class="queue-download-btn" title="Download Selected">⬇</button>
                     <button id="queue-clear" class="queue-clear">Clear</button>
                     <button id="queue-close" class="queue-close-btn" title="Close Queue">×</button>
@@ -686,6 +707,38 @@
 
 
 
+    <!-- Artist Bio Modal (Slide-up) -->
+    <div id="artist-bio-modal" class="artist-bio-modal hidden">
+        <div class="artist-bio-overlay" id="artist-bio-overlay"></div>
+        <div class="artist-bio-content">
+            <div class="artist-bio-drag-handle"></div>
+            <button id="artist-bio-close" class="artist-bio-close">×</button>
+            <div class="artist-bio-scroll-area">
+                <div class="artist-bio-header">
+                    <img id="artist-bio-img" class="artist-bio-img" src="/static/icon.svg" alt="Artist Image">
+                    <div class="artist-bio-header-info">
+                        <h2 id="artist-bio-name">Artist Name</h2>
+                        <div id="artist-bio-genres" class="artist-bio-genres"></div>
+                    </div>
+                </div>
+                <div class="artist-bio-body">
+                    <div class="artist-bio-section">
+                        <h3>About</h3>
+                        <div id="artist-bio-text" class="artist-bio-text loading-pulse"></div>
+                    </div>
+                    <div class="artist-bio-section" id="artist-socials-section">
+                        <h3>Links</h3>
+                        <div id="artist-bio-socials" class="artist-bio-socials"></div>
+                    </div>
+                    <div class="artist-bio-section" id="artist-similar-section">
+                        <h3>Similar Artists</h3>
+                        <div id="artist-bio-similar" class="artist-bio-similar-list"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Setlist Detail Modal -->
     <div id="setlist-modal" class="modal hidden">
         <div class="modal-content setlist-modal-content" style="max-height: 80vh; overflow-y: auto;">
@@ -820,6 +873,6 @@
     <script src="static/jsmediatags.min.js"></script>
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client"></script>
-    <script src="/static/app.js?t=1737202000"></script>
+    <script src="/static/app.js?t=1772366000"></script>
 </body>
 </html>

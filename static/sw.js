@@ -1,9 +1,9 @@
 /**
- * SpotiFLAC Service Worker
+ * Freedify Service Worker
  * Caches app shell for offline access
  */
 
-const CACHE_NAME = 'spotiflac-v6';
+const CACHE_NAME = 'freedify-v7';
 const STATIC_ASSETS = [
     '/',
     '/static/styles.css',
