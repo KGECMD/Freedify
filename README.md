@@ -249,8 +249,8 @@ To enable **Google Drive Sync** and **AI features (Smart Playlist, AI Radio, DJ 
 ### 📱 Mobile Ready
 - **PWA Support** - Install on your phone's home screen
 - **Responsive Design** - Works on any screen size
-- **320kbps MP3** - High quality streaming
-- **Lock Screen Controls** - Play/pause/skip from lock screen
+- **Lossless on the Go** - Streams pure FLAC by default (podcasts/live archives fall back to MP3)
+- **Lock Screen Controls** - Play/pause/skip from lock screen (*Note: Chrome on Android provides the best compatibility for lock screen and headphone controls*)
 
 ---
 
@@ -495,6 +495,18 @@ Click a result to see the full setlist with song annotations, then click "Listen
   <img src="screenshots/concert-search.png" alt="Concert Search" width="500">
   <br><em>Find upcoming concerts for your favorite artists with Ticketmaster + SeatGeek</em>
 </p>
+
+---
+
+## Star History
+
+<a href="https://www.star-history.com/#BioHapHazard/Freedify&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=BioHapHazard/Freedify&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=BioHapHazard/Freedify&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=BioHapHazard/Freedify&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ---
 
