@@ -133,7 +133,17 @@ async def get_audiobook_details(slug: str):
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
         
-        service = Service(ChromeDriverManager().install())
+        # Try system-installed Chromium first (Docker/Linux), fall back to webdriver-manager (local dev)
+        import shutil
+        chromium_path = shutil.which('chromium') or shutil.which('chromium-browser')
+        chromedriver_path = shutil.which('chromedriver')
+        
+        if chromium_path and chromedriver_path:
+            options.binary_location = chromium_path
+            service = Service(chromedriver_path)
+        else:
+            service = Service(ChromeDriverManager().install())
+        
         driver = webdriver.Chrome(service=service, options=options)
         try:
             driver.set_page_load_timeout(45)
