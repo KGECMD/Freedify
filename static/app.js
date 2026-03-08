@@ -8809,17 +8809,9 @@ async function checkExistingAudiobook(title) {
     try {
         // Search Premiumize for the exact title 
         // Torrents often have weird names, so we might not find it, which is fine
-        const response = await fetch(`/api/premiumize/search?q=${encodeURIComponent(title.split(' ')[0])}`); // Use first word to be safe
-        const data = await response.json();
+        const { folder, audioFiles } = await searchPremiumizeForAudiobook(title);
         
-        if (data && data.results && data.results.length > 0) {
-            // Find a folder match
-            const folder = data.results.find(i => i.type === 'folder');
-            const audioExtensions = ['.mp3', '.m4b', '.m4a', '.flac', '.wav', '.ogg'];
-            const audioFiles = data.results.filter(i => 
-                i.type === 'file' && audioExtensions.some(ext => i.name.toLowerCase().endsWith(ext))
-            );
-            
+        if (folder || audioFiles.length > 0) {
             if (folder) {
                 const btn = $('#audiobook-download-btn');
                 btn.textContent = '▶ Play from Premiumize Cache';
@@ -8834,6 +8826,47 @@ async function checkExistingAudiobook(title) {
         }
     } catch (e) {
         console.error("Cache check failed", e);
+    }
+}
+
+async function searchPremiumizeForAudiobook(title) {
+    try {
+        // Extract the two longest unique significant words from the title for a more specific query
+        const getLongestWords = (str) => {
+            const words = str.split(/[^a-zA-Z0-9]/).filter(w => w.length > 3).sort((a, b) => b.length - a.length);
+            return [...new Set(words)].slice(0, 2).join(' ');
+        };
+        const searchWord = getLongestWords(title) || title.split(' ')[0];
+        const response = await fetch(`/api/premiumize/search?q=${encodeURIComponent(searchWord)}`);
+        const data = await response.json();
+        
+        if (!data || !data.results || data.results.length === 0) {
+            return { folder: null, audioFiles: [] };
+        }
+        
+        const sanitize = str => str.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+        const targetWords = sanitize(title).split(' ').filter(w => w.length > 2 && w !== 'audiobook');
+        const wordsToMatch = targetWords.length > 0 ? targetWords : sanitize(title).split(' ');
+        
+        const isMatch = (name) => {
+            const n = sanitize(name);
+            const matchCount = wordsToMatch.filter(w => n.includes(w)).length;
+            // Require at least 50% of significant words to match
+            const required = Math.max(1, Math.ceil(wordsToMatch.length / 2));
+            return matchCount >= required;
+        };
+
+        const matchingResults = data.results.filter(i => isMatch(i.name));
+        const folder = matchingResults.find(i => i.type === 'folder');
+        const audioExtensions = ['.mp3', '.m4b', '.m4a', '.flac', '.wav', '.ogg'];
+        const audioFiles = matchingResults.filter(i => 
+            i.type === 'file' && audioExtensions.some(ext => i.name.toLowerCase().endsWith(ext))
+        );
+        
+        return { folder, audioFiles };
+    } catch (e) {
+        console.error("Premiumize search failed", e);
+        return { folder: null, audioFiles: [] };
     }
 }
 
@@ -8967,13 +9000,7 @@ async function pollAudiobookTransfer(transferId) {
 
 async function autoFindFinishedFolder() {
     try {
-        const response = await fetch(`/api/premiumize/search?q=${encodeURIComponent(currentAudiobookDetails.title.split(' ')[0])}`);
-        const data = await response.json();
-        const folder = data.results.find(i => i.type === 'folder');
-        const audioExtensions = ['.mp3', '.m4b', '.m4a', '.flac', '.wav', '.ogg'];
-        const audioFiles = data.results.filter(i => 
-            i.type === 'file' && audioExtensions.some(ext => i.name.toLowerCase().endsWith(ext))
-        );
+        const { folder, audioFiles } = await searchPremiumizeForAudiobook(currentAudiobookDetails.title);
         
         if (folder) {
             loadAudiobookFolder(folder.id, currentAudiobookDetails);

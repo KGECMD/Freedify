@@ -78,7 +78,10 @@ async def search_audiobooks(query: str, page: int = 1):
     posts = soup.find_all('div', class_='post')
     
     for post in posts:
-        title_elem = post.find('div', class_='postTitle').find('h2').find('a') if post.find('div', class_='postTitle') else None
+        title_div = post.find('div', class_='postTitle')
+        title_h2 = title_div.find('h2') if title_div else None
+        title_elem = title_h2.find('a') if title_h2 else None
+        
         if not title_elem:
             continue
             
@@ -93,7 +96,7 @@ async def search_audiobooks(query: str, page: int = 1):
 
         # Get cover image
         img_elem = post.find('img')
-        cover_image = img_elem['src'] if img_elem else None
+        cover_image = img_elem.get('src') if img_elem else None
         
         # Get details (Category, Language, Size, etc.) inside the postContent
         # Usually it's in a <p> or mixed text
