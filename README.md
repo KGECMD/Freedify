@@ -41,14 +41,8 @@ Open [http://localhost:8000](http://localhost:8000) and start streaming! 🎵
 - **Gapless Playback** - Seamless music transitions (default) with optional 1-second crossfade
 - **Music Discovery** - Click Artist name to search or Album name to view full tracklist instantly
 
-### 🧠 AI & Smart Features - Needs Gemini API Key to work
-- **Smart Playlist Generator** - Create custom playlists instantly by describing a vibe, genre, or activity.
-- **AI Radio** - Infinite queue recommendations based on your seed track (prevents genre drift)
-- **DJ Mode** - AI-powered mixing tips (transition technique, timing, key compatibility) - accuracy undetermined
-- **Mix Analysis** - Learn how to mix compatible tracks by Key and BPM
-
 ### 🔍 Search
-- **Deezer-powered** - Search tracks, albums, or artists with no rate limits
+- **Tidal-powered** - Lightning fast search for tracks, albums, and artists with no rate limits
 - **YouTube Music** - Search YT Music catalog via **More → YT Music**
 - **Jamendo Fallback** - 600K+ independent/Creative Commons tracks (auto-fallback if main sources miss)
 - **Live Show Search** - Search "Phish 2025" or "Grateful Dead 1977" to find live shows
@@ -58,6 +52,56 @@ Open [http://localhost:8000](http://localhost:8000) and start streaming! 🎵
 - **Episode Details** - Click any episode to see full title, description, and publish date
 - **Concert Search** - Find upcoming shows via **More → Concert Search** (Ticketmaster + SeatGeek)
 - **URL Import** - Paste links from Spotify, Bandcamp, Soundcloud, Archive.org, Phish.in
+
+### 🎙️ Podcasts
+- **My Podcasts** - Dedicated page to save and organize your favorite shows
+- **Episode Resume** - Automatically saves playback position for episodes and resumes where you left off
+- **Mark as Played** - Keep track of finished episodes with ✅ toggles
+- **History & Tags** - View recently played episodes and organize favorites with custom tags
+- **Queue & Download** - Episodes seamlessly integrate with the player queue and can be downloaded
+
+### 📚 Audiobooks
+- **Important Note:** Streaming audiobooks currently **requires a Premiumize.me account** for caching the torrents. If you use Real-Debrid, All-Debrid, or another service, we invite you to fork Freedify and submit a PR to add support for your preferred debrid service (as we currently lack accounts to test them with)!
+- **My Books** - Audiobook bookshelf to save, organize, and resume your audiobooks
+- **AudiobookBay Search** - Search and download audiobooks via AudiobookBay + Premiumize integration
+- **Book Info Modal** - Click any book for cover art, description, chapters, and play/resume controls
+- **Goodreads Reviews** - Integrated ratings, genres, and top community reviews from Goodreads
+- **Resume Playback** - Cached audiobook tracks resume where you left off — even from the bookshelf
+- **Google Drive Sync** - Audiobook favorites, cached tracks, and progress sync across devices
+
+### 📋 Playlists
+- **Add to Playlist** - Click the heart icon on any track to add it to a playlist
+- **Create Playlists** - Create new playlists on the fly from the Add to Playlist modal
+- **Playlists Tab** - Click **More → Playlists** to view all saved playlists
+- **Delete Songs** - Remove individual songs from any playlist
+- **Import Playlists** - Import M3U, CSV, or JSON playlist files via **More → Import Playlist**
+- **Export Playlists** - Export any playlist or queue as M3U, CSV, or JSON via the 📤 button
+- **Google Drive Sync** - Playlists, Library, and History sync to Google Drive
+- **Local Backup** - Also stored in browser localStorage (survives restarts)
+- **Delete Playlists** - Hover over playlist and click 🗑️ to remove
+
+### ⭐ My Library
+- **Star to Save** - Click ★ on any track to save to your Library (separate from playlists)
+- **Quick Access** - Library section on dashboard shows your starred tracks
+- **Full Library View** - Click "See All" to browse your entire collection
+- **Synced** - Library syncs to Google Drive alongside playlists
+
+### ☁️ Google Drive Sync
+- **Sync Modal** - Click ☁️ or press `Shift+S` to open the Drive Sync panel
+- **Granular Control** - Choose to sync:
+  - **Everything** (Playlists + Queue)
+  - **Playlists Only** (keeps cloud queue unchanged)
+  - **Queue Only** (keeps cloud playlists unchanged)
+- **Cross-Device Resume** - Start listening on one device, continue on another
+- **Smart Merge** - Partial uploads preserve existing cloud data
+- **Save Tracks** - Save audio directly to your "Freedify" folder
+- **Privacy** - Uses Drive appDataFolder (hidden from Drive UI)
+
+### 🧠 AI & Smart Features - Needs Gemini API Key to work
+- **Smart Playlist Generator** - Create custom playlists instantly by describing a vibe, genre, or activity.
+- **AI Radio** - Infinite queue recommendations based on your seed track (prevents genre drift)
+- **DJ Mode** - AI-powered mixing tips (transition technique, timing, key compatibility) - accuracy undetermined
+- **Mix Analysis** - Learn how to mix compatible tracks by Key and BPM
 
 ### 🎵 Live Show Archives
 - **Phish.in** - Search by year/month (e.g., Phish 2025 or Phish 2024/12)
@@ -140,60 +184,6 @@ Open [http://localhost:8000](http://localhost:8000) and start streaming! 🎵
 - **Quick Resume** - Click any item to instantly start playing
 - **Smart History** - Tracks last 50 played songs automatically
 - **Cross-Device** - History and library sync via Google Drive
-
-### 🎙️ Podcasts
-- **My Podcasts** - Dedicated page to save and organize your favorite shows
-- **Episode Resume** - Automatically saves playback position for episodes and resumes where you left off
-- **Mark as Played** - Keep track of finished episodes with ✅ toggles
-- **History & Tags** - View recently played episodes and organize favorites with custom tags
-- **Queue & Download** - Episodes seamlessly integrate with the player queue and can be downloaded
-
-### 📚 Audiobooks
-- **Important Note:** Streaming audiobooks currently **requires a Premiumize.me account** for caching the torrents. If you use Real-Debrid, All-Debrid, or another service, we invite you to fork Freedify and submit a PR to add support for your preferred debrid service (as we currently lack accounts to test them with)!
-- **My Books** - Audiobook bookshelf to save, organize, and resume your audiobooks
-- **AudiobookBay Search** - Search and download audiobooks via AudiobookBay + Premiumize integration
-- **Book Info Modal** - Click any book for cover art, description, chapters, and play/resume controls
-- **Goodreads Reviews** - Integrated ratings, genres, and top community reviews from Goodreads
-- **Resume Playback** - Cached audiobook tracks resume where you left off — even from the bookshelf
-- **Google Drive Sync** - Audiobook favorites, cached tracks, and progress sync across devices
-
-### ⭐ My Library
-- **Star to Save** - Click ★ on any track to save to your Library (separate from playlists)
-- **Quick Access** - Library section on dashboard shows your starred tracks
-- **Full Library View** - Click "See All" to browse your entire collection
-- **Synced** - Library syncs to Google Drive alongside playlists
-
-### 📋 Playlists
-- **Add to Playlist** - Click the heart icon on any track to add it to a playlist
-- **Create Playlists** - Create new playlists on the fly from the Add to Playlist modal
-- **Playlists Tab** - Click **More → Playlists** to view all saved playlists
-- **Delete Songs** - Remove individual songs from any playlist
-- **Import Playlists** - Import M3U, CSV, or JSON playlist files via **More → Import Playlist**
-- **Export Playlists** - Export any playlist or queue as M3U, CSV, or JSON via the 📤 button
-- **Google Drive Sync** - Playlists, Library, and History sync to Google Drive
-- **Local Backup** - Also stored in browser localStorage (survives restarts)
-- **Delete Playlists** - Hover over playlist and click 🗑️ to remove
-
-### 🎛️ Equalizer
-- **5-Band EQ** - Adjust 60Hz, 230Hz, 910Hz, 3.6kHz, 7.5kHz
-- **Bass Boost** - Extra low-end punch
-- **Volume Boost** - Up to +6dB gain
-- **Presets** - Flat, Bass Boost, Treble, Vocal
-
-### 🎨 Custom Themes
-- **6 Color Themes** - Default, Purple, Blue, Green, Pink, Orange
-- **Persistent** - Theme saved to localStorage
-
-### ☁️ Google Drive Sync
-- **Sync Modal** - Click ☁️ or press `Shift+S` to open the Drive Sync panel
-- **Granular Control** - Choose to sync:
-  - **Everything** (Playlists + Queue)
-  - **Playlists Only** (keeps cloud queue unchanged)
-  - **Queue Only** (keeps cloud playlists unchanged)
-- **Cross-Device Resume** - Start listening on one device, continue on another
-- **Smart Merge** - Partial uploads preserve existing cloud data
-- **Save Tracks** - Save audio directly to your "Freedify" folder
-- **Privacy** - Uses Drive appDataFolder (hidden from Drive UI)
 
 ### 🍎 Apple Music Users
 Freedify supports Spotify playlist URLs. To import your Apple Music playlists, use a free transfer tool:
