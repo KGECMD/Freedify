@@ -2771,6 +2771,9 @@ function showDetailView(item, tracks) {
                 <button class="detail-add-library-btn ${allInLibrary ? 'saved' : ''}" ${allInLibrary ? 'disabled' : ''}>
                     ${allInLibrary ? '★ In Library' : '★ Add All to Library'}
                 </button>
+                <button class="detail-add-playlist-btn" title="Add all to playlist">
+                    ♡ Add All to Playlist
+                </button>
             </div>
         </div>
     `;
@@ -2791,6 +2794,16 @@ function showDetailView(item, tracks) {
             });
         });
     }
+
+    // Wire up Add All to Playlist button
+    const addPlaylistBtn = detailInfo.querySelector('.detail-add-playlist-btn');
+    if (addPlaylistBtn && tracks.length > 0) {
+        addPlaylistBtn.addEventListener('click', () => {
+            if (typeof openAddToPlaylistModal === 'function') {
+                openAddToPlaylistModal(tracks);
+            }
+        });
+    }
     
     // Render tracks with download button (and delete for user playlists)
     detailTracks.innerHTML = tracks.map((t, i) => {
@@ -2807,7 +2820,7 @@ function showDetailView(item, tracks) {
                 ${renderDJBadgeForTrack(t)}
                 <span class="track-duration">${t.duration}</span>
                 <button class="star-btn ${isStarred ? 'starred' : ''}" data-track-id="${t.id}" title="${isStarred ? 'Remove from Library' : 'Add to Library'}">${isStarred ? '★' : '☆'}</button>
-
+                <button class="playlist-btn" title="Add to Playlist" onclick="event.stopPropagation(); if(typeof window.openAddToPlaylistModal === 'function') window.openAddToPlaylistModal(JSON.parse(decodeURIComponent('${encodeURIComponent(JSON.stringify(t)).replace(/'/g, "%27")}')))">♡</button>
                 <button class="download-btn" title="Download" onclick="event.stopPropagation(); openDownloadModal('${encodeURIComponent(JSON.stringify(t)).replace(/'/g, "%27")}')">
                     ⬇
                 </button>

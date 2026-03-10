@@ -67,7 +67,6 @@ class SpotifyService:
                 logger.error(f"Client Credentials auth failed: {e}")
 
         # 2. Try Cookie Auth (sp_dc) - Mimics logged-in Web Player
-        # This is the best fallback if Developer App creation is blocked
         cookies = None
         if self.sp_dc:
             cookies = {"sp_dc": self.sp_dc}
@@ -81,7 +80,6 @@ class SpotifyService:
         }
         
         try:
-            # If cookies are passed, this request becomes authenticated!
             response = await self.client.get(self.TOKEN_URL, headers=headers, cookies=cookies)
             if response.status_code == 200:
                 data = response.json()
@@ -92,17 +90,7 @@ class SpotifyService:
         except Exception as e:
             logger.warning(f"Web Player token fetch failed: {e}")
         
-        # 4. Fallback: Embed Page
-            if response.status_code == 200:
-                data = response.json()
-                self.access_token = data.get("accessToken")
-                if self.access_token:
-                    logger.info("Got Spotify token via direct method")
-                    return self.access_token
-        except Exception as e:
-            logger.warning(f"Direct token fetch failed: {e}")
-        
-        # 3. Fallback: Embed Page
+        # 4. Fallback: Embed Page token
         try:
             embed_url = "https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT"
             response = await self.client.get(embed_url, headers={"User-Agent": get_random_user_agent()})
@@ -133,10 +121,14 @@ class SpotifyService:
             }
             response = await self.client.get(f"{self.API_BASE}{endpoint}", headers=headers, params=params)
             
-            if response.status_code == 401:
-                logger.warning("Got 401, refreshing Spotify token...")
-                self.access_token = None
-                continue
+            if response.status_code in (401, 403):
+                if attempt < max_retries - 1:
+                    logger.warning(f"Got {response.status_code}, refreshing Spotify token (attempt {attempt + 1}/{max_retries})...")
+                    self.access_token = None
+                    continue
+                else:
+                    # Final attempt failed — raise so caller can try embed fallback
+                    response.raise_for_status()
             
             if response.status_code == 429:
                 retry_after = min(int(response.headers.get("Retry-After", retry_delay)), 10)
@@ -193,7 +185,7 @@ class SpotifyService:
     # ========== ALBUM METHODS ==========
     
     async def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album with all tracks."""
+        """Get album with all tracks. Falls back to embed scraping on 403."""
         try:
             data = await self._api_request(f"/albums/{album_id}", {"market": "US"})
             album = self._format_album(data)
@@ -219,8 +211,119 @@ class SpotifyService:
             album["tracks"] = tracks
             return album
         except Exception as e:
+            if "403" in str(e):
+                logger.warning(f"Spotify API returned 403 for album {album_id}, trying embed scrape...")
+                return await self._scrape_embed_album(album_id)
             logger.error(f"Error fetching Spotify album {album_id}: {e}")
             return None
+    
+    async def _scrape_embed_album(self, album_id: str) -> Optional[Dict[str, Any]]:
+        """Scrape album data from Spotify embed page as fallback when API returns 403."""
+        import json
+        try:
+            embed_url = f"https://open.spotify.com/embed/album/{album_id}"
+            headers = {"User-Agent": get_random_user_agent()}
+            response = await self.client.get(embed_url, headers=headers)
+            if response.status_code != 200:
+                logger.error(f"Embed page returned {response.status_code} for album {album_id}")
+                return None
+            
+            # Extract __NEXT_DATA__ JSON from the HTML
+            match = re.search(r'<script\s+id="__NEXT_DATA__"\s+type="application/json">([^<]+)</script>', response.text)
+            if not match:
+                logger.error(f"Could not find __NEXT_DATA__ in embed page for album {album_id}")
+                return None
+            
+            next_data = json.loads(match.group(1))
+            entity = next_data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {})
+            
+            if not entity:
+                logger.error(f"No entity found in embed data for album {album_id}")
+                return None
+            
+            # Extract cover art
+            cover_art = None
+            cover_data = entity.get("coverArt", {})
+            if cover_data:
+                sources = cover_data.get("sources", [])
+                if sources:
+                    cover_art = sorted(sources, key=lambda x: x.get("width", 0), reverse=True)[0].get("url")
+            
+            # Build album object
+            album = {
+                "id": album_id,
+                "type": "album",
+                "name": entity.get("name", "Unknown Album"),
+                "artists": entity.get("subtitle", "Unknown Artist"),
+                "album_art": cover_art,
+                "release_date": "",
+                "total_tracks": len(entity.get("trackList", [])),
+                "source": "spotify",
+            }
+            
+            tracks = []
+            for item in entity.get("trackList", []):
+                uri = item.get("uri", "")
+                track_id = uri.split(":")[-1] if "spotify:track:" in uri else None
+                if not track_id:
+                    continue
+                
+                tracks.append({
+                    "id": track_id,
+                    "type": "track",
+                    "name": item.get("title", "Unknown"),
+                    "artists": item.get("subtitle", "Unknown Artist"),
+                    "artist_names": [a.strip() for a in item.get("subtitle", "Unknown Artist").split(",")],
+                    "album": album["name"],
+                    "album_id": album_id,
+                    "album_art": cover_art,
+                    "duration_ms": item.get("duration", 0),
+                    "duration": self._format_duration(item.get("duration", 0)),
+                    "isrc": None,
+                    "source": "spotify",
+                })
+            
+            album["tracks"] = tracks
+            logger.info(f"Scraped {len(tracks)} tracks from embed page for album '{album['name']}'")
+            
+            # Enrich tracks with real album art from Deezer
+            await self._enrich_tracks_with_deezer_art(tracks)
+            
+            return album
+        except Exception as e:
+            logger.error(f"Embed scrape failed for album {album_id}: {e}")
+            return None
+    
+    async def _enrich_tracks_with_deezer_art(self, tracks: List[Dict]) -> None:
+        """Enrich scraped tracks with real album art from Deezer search API (no rate limits)."""
+        import asyncio
+        
+        async def fetch_art(track):
+            try:
+                query = f"{track['artists']} {track['name']}".replace('&', '')
+                response = await self.client.get(
+                    "https://api.deezer.com/search",
+                    params={"q": query, "limit": 1},
+                    headers={"User-Agent": get_random_user_agent()}
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    results = data.get("data", [])
+                    if results:
+                        album_data = results[0].get("album", {})
+                        cover = album_data.get("cover_big") or album_data.get("cover_medium") or album_data.get("cover")
+                        if cover:
+                            track["album_art"] = cover
+                            track["album"] = album_data.get("title", track.get("album", ""))
+            except Exception as e:
+                logger.debug(f"Deezer art lookup failed for '{track.get('name')}': {e}")
+        
+        # Run all lookups concurrently (Deezer has no rate limits)
+        tasks = [fetch_art(t) for t in tracks]
+        await asyncio.gather(*tasks)
+        
+        enriched = sum(1 for t in tracks if t.get("album_art") and "deezer" in t["album_art"])
+        logger.info(f"Enriched {enriched}/{len(tracks)} tracks with Deezer album art")
     
     def _format_album(self, item: dict) -> dict:
         return {
@@ -237,7 +340,7 @@ class SpotifyService:
     # ========== PLAYLIST METHODS ==========
     
     async def get_playlist(self, playlist_id: str) -> Optional[Dict[str, Any]]:
-        """Get playlist with all tracks (handles pagination for 100+ songs)."""
+        """Get playlist with all tracks (handles pagination for 100+ songs). Falls back to embed scraping on 403."""
         try:
             data = await self._api_request(f"/playlists/{playlist_id}", {"market": "US"})
             
@@ -265,8 +368,6 @@ class SpotifyService:
             while next_url:
                 logger.info(f"Fetching next page of playlist tracks... ({len(tracks)}/{playlist['total_tracks']})")
                 try:
-                    # Extract the path from the full URL
-                    # next_url is like "https://api.spotify.com/v1/playlists/.../tracks?offset=100&limit=100"
                     next_response = await self.client.get(
                         next_url,
                         headers={"Authorization": f"Bearer {self.access_token}"}
@@ -288,7 +389,88 @@ class SpotifyService:
             playlist["tracks"] = tracks
             return playlist
         except Exception as e:
+            if "403" in str(e):
+                logger.warning(f"Spotify API returned 403 for playlist {playlist_id}, trying embed scrape...")
+                return await self._scrape_embed_playlist(playlist_id)
             logger.error(f"Error fetching Spotify playlist {playlist_id}: {e}")
+            return None
+    
+    async def _scrape_embed_playlist(self, playlist_id: str) -> Optional[Dict[str, Any]]:
+        """Scrape playlist data from Spotify embed page as fallback when API returns 403."""
+        import json
+        try:
+            embed_url = f"https://open.spotify.com/embed/playlist/{playlist_id}"
+            headers = {"User-Agent": get_random_user_agent()}
+            response = await self.client.get(embed_url, headers=headers)
+            if response.status_code != 200:
+                logger.error(f"Embed page returned {response.status_code} for playlist {playlist_id}")
+                return None
+            
+            # Extract __NEXT_DATA__ JSON from the HTML
+            match = re.search(r'<script\s+id="__NEXT_DATA__"\s+type="application/json">([^<]+)</script>', response.text)
+            if not match:
+                logger.error(f"Could not find __NEXT_DATA__ in embed page for playlist {playlist_id}")
+                return None
+            
+            next_data = json.loads(match.group(1))
+            entity = next_data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {})
+            
+            if not entity:
+                logger.error(f"No entity found in embed data for playlist {playlist_id}")
+                return None
+            
+            # Extract cover art
+            cover_art = None
+            cover_data = entity.get("coverArt", {})
+            if cover_data:
+                sources = cover_data.get("sources", [])
+                if sources:
+                    cover_art = sorted(sources, key=lambda x: x.get("width", 0), reverse=True)[0].get("url")
+            
+            # Build playlist object
+            track_list = entity.get("trackList", [])
+            playlist = {
+                "id": playlist_id,
+                "type": "playlist",
+                "name": entity.get("name", "Unknown Playlist"),
+                "description": entity.get("description", ""),
+                "album_art": cover_art,
+                "owner": entity.get("subtitle", ""),
+                "total_tracks": len(track_list),
+                "source": "spotify",
+            }
+            
+            tracks = []
+            for item in track_list:
+                uri = item.get("uri", "")
+                track_id = uri.split(":")[-1] if "spotify:track:" in uri else None
+                if not track_id:
+                    continue
+                
+                tracks.append({
+                    "id": track_id,
+                    "type": "track",
+                    "name": item.get("title", "Unknown"),
+                    "artists": item.get("subtitle", "Unknown Artist"),
+                    "artist_names": [a.strip() for a in item.get("subtitle", "Unknown Artist").split(",")],
+                    "album": "",
+                    "album_id": "",
+                    "album_art": cover_art,
+                    "duration_ms": item.get("duration", 0),
+                    "duration": self._format_duration(item.get("duration", 0)),
+                    "isrc": None,
+                    "source": "spotify",
+                })
+            
+            playlist["tracks"] = tracks
+            logger.info(f"Scraped {len(tracks)} tracks from embed page for playlist '{playlist['name']}'")
+            
+            # Enrich tracks with real album art from Deezer
+            await self._enrich_tracks_with_deezer_art(tracks)
+            
+            return playlist
+        except Exception as e:
+            logger.error(f"Embed scrape failed for playlist {playlist_id}: {e}")
             return None
     
     # ========== ARTIST METHODS ==========

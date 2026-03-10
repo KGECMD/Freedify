@@ -3882,7 +3882,8 @@ body {
     margin-top: var(--spacing-sm);
 }
 
-.detail-add-library-btn {
+.detail-add-library-btn,
+.detail-add-playlist-btn {
     padding: 8px 16px;
     border-radius: var(--radius-full);
     font-size: 0.8rem;
@@ -3894,13 +3895,16 @@ body {
     color: var(--text-primary);
 }
 
-.detail-add-library-btn:hover:not(:disabled) {
+.detail-add-library-btn:hover:not(:disabled),
+.detail-add-playlist-btn:hover:not(:disabled) {
     background: var(--bg-tertiary);
     border-color: var(--accent);
 }
 
 .detail-add-library-btn.saved,
-.detail-add-library-btn:disabled {
+.detail-add-library-btn:disabled,
+.detail-add-playlist-btn.saved,
+.detail-add-playlist-btn:disabled {
     background: rgba(255, 193, 7, 0.15);
     border-color: #ffc107;
     color: #ffc107;
@@ -5975,8 +5979,9 @@ body {
     }
 }
 
-/* ==================== Library Star Button ==================== */
-.star-btn {
+/* ==================== Library Star & Playlist Heart Button ==================== */
+.star-btn,
+.playlist-btn {
     background: none;
     border: none;
     cursor: pointer;
@@ -5990,6 +5995,12 @@ body {
 .star-btn:hover {
     transform: scale(1.2);
     color: #ffd700;
+    opacity: 1;
+}
+
+.playlist-btn:hover {
+    transform: scale(1.2);
+    color: #ff4757;
     opacity: 1;
 }
 
