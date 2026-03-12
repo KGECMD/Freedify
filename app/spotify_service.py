@@ -33,14 +33,166 @@ class SpotifyService:
     
     def __init__(self):
         import os
+        import json
         self.access_token: Optional[str] = None
+        self.user_access_token: Optional[str] = None
+        self.user_token_expires: float = 0
+        
         self.client_id = os.environ.get("SPOTIFY_CLIENT_ID")
         self.client_secret = os.environ.get("SPOTIFY_CLIENT_SECRET")
         self.sp_dc = os.environ.get("SPOTIFY_SP_DC")
         self.client = httpx.AsyncClient(timeout=30.0)
+        
+        # Load user token from local settings file if available
+        self.settings_file = os.path.join(os.path.dirname(__file__), "..", "freedify_settings.json")
+        self._load_settings()
+
+    def _load_settings(self):
+        import json
+        import os
+        if os.path.exists(self.settings_file):
+            try:
+                with open(self.settings_file, "r") as f:
+                    data = json.load(f)
+                    self.spotify_refresh_token = data.get("spotify_refresh_token")
+            except:
+                self.spotify_refresh_token = None
+        else:
+            self.spotify_refresh_token = None
+
+    def _save_settings(self):
+        import json
+        try:
+            data = {"spotify_refresh_token": self.spotify_refresh_token}
+            with open(self.settings_file, "w") as f:
+                json.dump(data, f)
+        except Exception as e:
+            logger.error(f"Failed to save settings: {e}")
     
-    async def _get_access_token(self) -> str:
-        """Get access token (Client Creds > Cookie > Web Player > Embed)."""
+    # ========== OAUTH METHODS ==========
+
+    def get_oauth_url(self, redirect_uri: str) -> Optional[str]:
+        """Generate Spotify OAuth URL for user login."""
+        if not self.client_id:
+            return None
+        import urllib.parse
+        scope = "playlist-read-private playlist-read-collaborative"
+        params = {
+            "client_id": self.client_id,
+            "response_type": "code",
+            "redirect_uri": redirect_uri,
+            "scope": "playlist-read-private playlist-read-collaborative user-read-private",
+            "show_dialog": "true"
+        }
+        return f"https://accounts.spotify.com/authorize?{urllib.parse.urlencode(params)}"
+
+    async def exchange_oauth_code(self, code: str, redirect_uri: str) -> bool:
+        """Exchange OAuth code for tokens and save refresh token."""
+        if not self.client_id or not self.client_secret:
+            return False
+            
+        import base64
+        import time
+        auth_str = f"{self.client_id}:{self.client_secret}"
+        b64_auth = base64.b64encode(auth_str.encode()).decode()
+        
+        headers = {
+            "Authorization": f"Basic {b64_auth}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri
+        }
+        
+        try:
+            response = await self.client.post(self.AUTH_URL, headers=headers, data=data)
+            if response.status_code == 200:
+                token_data = response.json()
+                self.user_access_token = token_data.get("access_token")
+                self.user_token_expires = time.time() + token_data.get("expires_in", 3600) - 60
+                
+                refresh_token = token_data.get("refresh_token")
+                if refresh_token:
+                    self.spotify_refresh_token = refresh_token
+                    self._save_settings()
+                
+                logger.info("Successfully exchanged Spotify OAuth code for user token")
+                return True
+            else:
+                logger.error(f"OAuth code exchange failed: {response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"OAuth code exchange error: {e}")
+            return False
+
+    def has_user_token(self) -> bool:
+        """Check if user has linked their Spotify account."""
+        return self.spotify_refresh_token is not None
+
+    def clear_user_token(self):
+        """Disconnect user Spotify account."""
+        self.spotify_refresh_token = None
+        self.user_access_token = None
+        self.user_token_expires = 0
+        self._save_settings()
+
+    async def _refresh_user_token(self) -> bool:
+        """Refresh the user's OAuth access token."""
+        if not self.spotify_refresh_token or not self.client_id or not self.client_secret:
+            return False
+            
+        import base64
+        import time
+        auth_str = f"{self.client_id}:{self.client_secret}"
+        b64_auth = base64.b64encode(auth_str.encode()).decode()
+        
+        headers = {
+            "Authorization": f"Basic {b64_auth}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": self.spotify_refresh_token
+        }
+        
+        try:
+            response = await self.client.post(self.AUTH_URL, headers=headers, data=data)
+            if response.status_code == 200:
+                token_data = response.json()
+                self.user_access_token = token_data.get("access_token")
+                self.user_token_expires = time.time() + token_data.get("expires_in", 3600) - 60
+                
+                # Sometimes a new refresh token is returned
+                new_refresh = token_data.get("refresh_token")
+                if new_refresh:
+                    self.spotify_refresh_token = new_refresh
+                    self._save_settings()
+                    
+                logger.info("Successfully refreshed Spotify user token")
+                return True
+            else:
+                logger.error(f"Failed to refresh user token: {response.text}")
+                # If refresh token is revoked/invalid, clear it
+                if response.status_code in [400, 401]:
+                    self.clear_user_token()
+                return False
+        except Exception as e:
+            logger.error(f"User token refresh error: {e}")
+            return False
+
+    async def _get_access_token(self, force_client_credentials: bool = False) -> str:
+        """Get access token (OAuth User > Client Creds > Cookie > Web Player > Embed)."""
+        import time
+        
+        # 0. Try User OAuth Token First
+        if self.spotify_refresh_token and not force_client_credentials:
+            if not self.user_access_token or time.time() > self.user_token_expires:
+                await self._refresh_user_token()
+            if self.user_access_token and time.time() < self.user_token_expires:
+                return self.user_access_token
+                
         if self.access_token:
             return self.access_token
             
@@ -105,7 +257,46 @@ class SpotifyService:
         
         raise Exception("Failed to get Spotify access token")
     
-    async def _api_request(self, endpoint: str, params: dict = None) -> dict:
+    async def _get_web_player_token(self) -> Optional[str]:
+        """Get an anonymous Web Player token (separate from self.access_token).
+        
+        Used as fallback when Client Credentials token is blocked on certain endpoints.
+        """
+        headers = {
+            "User-Agent": get_random_user_agent(),
+            "Accept": "application/json",
+            "Referer": "https://open.spotify.com/",
+        }
+        
+        # Try cookie-authenticated token first, then anonymous
+        cookies = {"sp_dc": self.sp_dc} if self.sp_dc else None
+        
+        try:
+            response = await self.client.get(self.TOKEN_URL, headers=headers, cookies=cookies)
+            if response.status_code == 200:
+                data = response.json()
+                token = data.get("accessToken")
+                if token:
+                    logger.info(f"Got Web Player token for fallback ({'Authenticated' if cookies else 'Anonymous'})")
+                    return token
+        except Exception as e:
+            logger.warning(f"Web Player fallback token fetch failed: {e}")
+        
+        # Try embed page token as last resort
+        try:
+            embed_url = "https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT"
+            response = await self.client.get(embed_url, headers={"User-Agent": get_random_user_agent()})
+            if response.status_code == 200:
+                token_match = re.search(r'"accessToken":"([^"]+)"', response.text)
+                if token_match:
+                    logger.info("Got embed page token for fallback")
+                    return token_match.group(1)
+        except Exception as e:
+            logger.warning(f"Embed fallback token fetch failed: {e}")
+        
+        return None
+    
+    async def _api_request(self, endpoint: str, params: dict = None, force_client_credentials: bool = False) -> dict:
         """Make authenticated API request with rate limit handling."""
         import asyncio
         
@@ -113,7 +304,7 @@ class SpotifyService:
         retry_delay = 2
         
         for attempt in range(max_retries):
-            token = await self._get_access_token()
+            token = await self._get_access_token(force_client_credentials=force_client_credentials)
             headers = {
                 "Authorization": f"Bearer {token}",
                 "User-Agent": get_random_user_agent(),
@@ -124,7 +315,17 @@ class SpotifyService:
             if response.status_code in (401, 403):
                 if attempt < max_retries - 1:
                     logger.warning(f"Got {response.status_code}, refreshing Spotify token (attempt {attempt + 1}/{max_retries})...")
-                    self.access_token = None
+                    if response.status_code == 403 and token == self.user_access_token and not force_client_credentials:
+                        logger.warning("User token got 403 Forbidden. Forcing Client Credentials fallback for retry.")
+                        force_client_credentials = True
+                        continue
+                        
+                    if token == self.user_access_token:
+                        # Clear user token to force refresh
+                        self.user_access_token = None
+                    else:
+                        # Clear client token to force refresh
+                        self.access_token = None
                     continue
                 else:
                     # Final attempt failed — raise so caller can try embed fallback
@@ -340,58 +541,272 @@ class SpotifyService:
     # ========== PLAYLIST METHODS ==========
     
     async def get_playlist(self, playlist_id: str) -> Optional[Dict[str, Any]]:
-        """Get playlist with all tracks (handles pagination for 100+ songs). Falls back to embed scraping on 403."""
+        """Get playlist with all tracks. Uses API for metadata, embed scraping for tracks."""
+        import json
+        
+        playlist = None
+        tracks = []
+        
         try:
-            data = await self._api_request(f"/playlists/{playlist_id}", {"market": "US"})
-            
-            playlist = {
-                "id": data["id"],
-                "type": "playlist",
-                "name": data["name"],
-                "description": data.get("description", ""),
-                "album_art": self._get_best_image(data.get("images", [])),
-                "owner": data.get("owner", {}).get("display_name", ""),
-                "total_tracks": data.get("tracks", {}).get("total", 0),
-                "source": "spotify",
-            }
-            
-            tracks = []
-            # Process first page of tracks
-            tracks_data = data.get("tracks", {})
-            for item in tracks_data.get("items", []):
-                track_data = item.get("track")
-                if track_data and track_data.get("id"):
-                    tracks.append(self._format_track(track_data))
-            
-            # Paginate through remaining tracks if playlist has more than 100
-            next_url = tracks_data.get("next")
-            while next_url:
-                logger.info(f"Fetching next page of playlist tracks... ({len(tracks)}/{playlist['total_tracks']})")
-                try:
-                    next_response = await self.client.get(
-                        next_url,
-                        headers={"Authorization": f"Bearer {self.access_token}"}
-                    )
-                    next_response.raise_for_status()
-                    next_data = next_response.json()
-                    
-                    for item in next_data.get("items", []):
+            # Step 1: Get playlist metadata from API (works with Client Credentials)
+            try:
+                data = await self._api_request(f"/playlists/{playlist_id}")
+                playlist = {
+                    "id": data["id"],
+                    "type": "playlist",
+                    "name": data["name"],
+                    "description": data.get("description", ""),
+                    "album_art": self._get_best_image(data.get("images", [])),
+                    "owner": data.get("owner", {}).get("display_name", ""),
+                    "total_tracks": data.get("tracks", {}).get("total", 0),
+                    "source": "spotify",
+                }
+                
+                # Check if tracks are included inline
+                tracks_data = data.get("tracks", {})
+                items = tracks_data.get("items", [])
+                if items:
+                    for item in items:
                         track_data = item.get("track")
                         if track_data and track_data.get("id"):
                             tracks.append(self._format_track(track_data))
                     
-                    next_url = next_data.get("next")
-                except Exception as e:
-                    logger.error(f"Error fetching next page: {e}")
-                    break
+                    if len(tracks) >= playlist["total_tracks"]:
+                        logger.info(f"Loaded all {len(tracks)} tracks inline from playlist '{playlist['name']}'")
+                        playlist["tracks"] = tracks
+                        return playlist
+                    # Have some inline tracks but not all
+                    logger.info(f"Got {len(tracks)} inline tracks, need {playlist['total_tracks']} total")
+                else:
+                    logger.info(f"Got 0 inline tracks, need {playlist['total_tracks']} total. Proceeding to pagination.")
+            except Exception as e:
+                logger.warning(f"API metadata fetch encountered an issue (mostly likely missing inline tracks): {e}")
             
-            logger.info(f"Loaded {len(tracks)} tracks from playlist '{playlist['name']}'")
+            # Step 2: Use regular API pagination if we have a real user token
+            # Note: Spotify API sometimes reports total_tracks=0 on the initial metadata request
+            # for Premium accounts without 'market' parameter.
+            total = playlist["total_tracks"]
+            
+            if playlist and self.has_user_token() and (len(tracks) < total or total == 0):
+                logger.info(f"User is authenticated, paginating remaining tracks via Spotify API...")
+                offset = len(tracks)
+                page_data = {}
+                
+                # If total was 0, pretend it's at least 1 so we enter the loop and fetch
+                if total == 0:
+                    total = 1
+                
+                while offset < total:
+                    try:
+                        logger.info(f"Fetching API page (offset {offset}/{total})...")
+                        page_data = await self._api_request(f"/playlists/{playlist_id}/tracks", {
+                            "limit": 100,
+                            "offset": offset,
+                            "additional_types": "track",
+                            "fields": "items(track(id,name,artists(name),album(name,id,images),duration_ms,external_ids)),total,next"
+                        })
+                        
+                        if total == 1 and page_data.get("total"):
+                            total = page_data.get("total")
+                        
+                        items = page_data.get("items", [])
+                        if not items:
+                            break
+                            
+                        for item in items:
+                            track_data = item.get("track")
+                            if track_data and track_data.get("id"):
+                                tracks.append(self._format_track(track_data))
+                        
+                        offset += len(items)
+                        
+                        if not page_data.get("next"):
+                            break
+                    except Exception as e:
+                        logger.warning(f"Failed to paginate API with user token: {e}")
+                        break
+                
+                # If we achieved our goal, we can just skip the embed scrape entirely!
+                if len(tracks) >= total:
+                    playlist["tracks"] = tracks
+                    playlist["total_tracks"] = len(tracks)
+                    for track in tracks:
+                        track["source"] = "spotify"
+                    logger.info(f"Loaded {len(tracks)} tracks via API pagination")
+                    return playlist
+                else:
+                    logger.warning(f"API pagination gave up at {len(tracks)}/{total} tracks. Falling back to embed scrape.")
+                    
+            # Step 3: Fallback - Scrape embed page for tracks
+            # If we reach here, we either don't have a token, or the API pagination failed/returned 403.
+            # But we might already have the basic playlist metadata from Step 1!
+            embed_tracks = []
+
+            embed_url = f"https://open.spotify.com/embed/playlist/{playlist_id}"
+            headers = {"User-Agent": get_random_user_agent()}
+            response = await self.client.get(embed_url, headers=headers)
+            
+            if response.status_code != 200:
+                logger.error(f"Embed page returned {response.status_code}")
+                # We return whatever we have so far
+                if playlist:
+                    playlist["tracks"] = tracks
+                    for t in playlist["tracks"]: t["source"] = "spotify"
+                return playlist
+            
+            # Extract __NEXT_DATA__
+            match = re.search(r'<script\s+id="__NEXT_DATA__"\s+type="application/json">([^<]+)</script>', response.text)
+            if not match:
+                logger.error("Could not find __NEXT_DATA__ in embed page")
+                if playlist:
+                    playlist["tracks"] = tracks
+                return playlist
+            
+            next_data = json.loads(match.group(1))
+            entity = next_data.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {})
+            
+            # Extract embed access token
+            embed_token = None
+            token_match = re.search(r'"accessToken":"([^"]+)"', response.text)
+            if token_match:
+                embed_token = token_match.group(1)
+            
+            if not entity:
+                logger.error("No entity found in embed data")
+                if playlist:
+                    playlist["tracks"] = tracks
+                return playlist
+            
+            # Build playlist metadata if missing
+            if not playlist:
+                cover_art = None
+                cover_data = entity.get("coverArt", {})
+                if cover_data:
+                    sources = cover_data.get("sources", [])
+                    if sources:
+                        cover_art = sorted(sources, key=lambda x: x.get("width", 0), reverse=True)[0].get("url")
+                
+                playlist = {
+                    "id": playlist_id,
+                    "type": "playlist",
+                    "name": entity.get("name", "Unknown Playlist"),
+                    "description": entity.get("description", ""),
+                    "album_art": cover_art,
+                    "owner": entity.get("subtitle", ""),
+                    "total_tracks": 0,
+                    "source": "spotify",
+                }
+            
+            # Process tracks from embed page
+            track_list = entity.get("trackList", [])
+            cover_art = playlist.get("album_art")
+            
+            for item in track_list:
+                uri = item.get("uri", "")
+                track_id = uri.split(":")[-1] if "spotify:track:" in uri else None
+                if not track_id:
+                    continue
+                
+                # Make sure we don't duplicate tracks already loaded from API inline items
+                if any(t["id"] == track_id for t in tracks):
+                    continue
+                
+                track_art = cover_art
+                item_cover_data = item.get("coverArt", {})
+                if item_cover_data:
+                    sources = item_cover_data.get("sources", [])
+                    if sources:
+                        track_art = sorted(sources, key=lambda x: x.get("width", 0), reverse=True)[0].get("url")
+                    
+                embed_tracks.append({
+                    "id": track_id,
+                    "type": "track",
+                    "name": item.get("title", "Unknown"),
+                    "artists": item.get("subtitle", "Unknown Artist"),
+                    "artist_names": [a.strip() for a in item.get("subtitle", "Unknown Artist").split(",")],
+                    "album": "",
+                    "album_id": "",
+                    "album_art": track_art,
+                    "duration_ms": item.get("duration", 0),
+                    "duration": self._format_duration(item.get("duration", 0)),
+                    "isrc": None,
+                    "source": "spotify",
+                })
+            
+            # Combine the tracks
+            tracks.extend(embed_tracks)
+            logger.info(f"Scraped {len(embed_tracks)} new tracks from embed page for '{playlist['name']}'")
+            
+            # Step 4: If embed didn't get all tracks, use embed token to fetch remaining via batch lookup
+            total_expected = playlist.get("total_tracks", 0) or len(tracks)
+            
+            if embed_token and len(tracks) < total_expected and len(tracks) > 0:
+                logger.info(f"Have {len(tracks)}/{total_expected} tracks, fetching remaining via batch track lookup...")
+                
+                try:
+                    all_track_ids = set(t["id"] for t in tracks)
+                    offset = len(tracks)
+                    
+                    while offset < total_expected:
+                        logger.info(f"Fetching track IDs via embed token... ({offset}/{total_expected})")
+                        try:
+                            resp = await self.client.get(
+                                f"{self.API_BASE}/playlists/{playlist_id}/tracks",
+                                params={
+                                    "market": "US",
+                                    "limit": 50,
+                                    "offset": offset,
+                                    "fields": "items(track(id,name,artists(name),album(name,id,images),duration_ms,external_ids)),total,next"
+                                },
+                                headers={
+                                    "Authorization": f"Bearer {embed_token}",
+                                    "User-Agent": get_random_user_agent(),
+                                    "Accept": "application/json",
+                                }
+                            )
+                            
+                            if resp.status_code != 200:
+                                logger.warning(f"Embed token tracks fetch returned {resp.status_code}, stopping pagination")
+                                break
+                            
+                            page_data = resp.json()
+                            page_items = page_data.get("items", [])
+                            if not page_items:
+                                break
+                            
+                            for item in page_items:
+                                track_data = item.get("track")
+                                if track_data and track_data.get("id") and track_data["id"] not in all_track_ids:
+                                    tracks.append(self._format_track(track_data))
+                                    all_track_ids.add(track_data["id"])
+                            
+                            offset += len(page_items)
+                            
+                            if not page_data.get("next"):
+                                break
+                        except Exception as e:
+                            logger.warning(f"Embed token pagination error at offset {offset}: {e}")
+                            break
+                    
+                    logger.info(f"After pagination: {len(tracks)} total tracks")
+                except Exception as e:
+                    logger.warning(f"Batch track lookup failed: {e}")
+            
+            # Step 5: Add source attribution
+            for track in tracks:
+                track["source"] = "spotify"
+            
+            # Enrich tracks with real album art from Deezer since Spotify embed omits them now
+            if len(embed_tracks) > 0:
+                logger.info(f"Enriching {len(embed_tracks)} scraped tracks with Deezer album art...")
+                await self._enrich_tracks_with_deezer_art(tracks)
+                
             playlist["tracks"] = tracks
+            playlist["total_tracks"] = len(tracks)
+            logger.info(f"Loaded {len(tracks)} tracks from playlist '{playlist['name']}'")
             return playlist
+            
         except Exception as e:
-            if "403" in str(e):
-                logger.warning(f"Spotify API returned 403 for playlist {playlist_id}, trying embed scrape...")
-                return await self._scrape_embed_playlist(playlist_id)
             logger.error(f"Error fetching Spotify playlist {playlist_id}: {e}")
             return None
     

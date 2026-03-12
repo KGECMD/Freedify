@@ -9147,3 +9147,54 @@ async function loadAudiobookFolder(folderId, audiobookDetails) {
         showError('Failed to load audiobook folder');
     }
 }
+
+// ========== SPOTIFY OAUTH & UI ==========
+(function initSpotifyOAuth() {
+    const spotifyBtn = document.getElementById('spotify-connect-btn');
+    if (!spotifyBtn) return;
+    
+    // Check URL for OAuth return status
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('spotify_connected') === 'true') {
+        showToast('🟢 Connected to Spotify Account');
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (urlParams.get('spotify_error')) {
+        showToast('🔴 Spotify connection failed: ' + urlParams.get('spotify_error'));
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    
+    // Check current status
+    fetch('/api/spotify/status')
+        .then(res => res.json())
+        .then(data => {
+            if (data.connected) {
+                spotifyBtn.textContent = '🟢 Disconnect Spotify';
+                spotifyBtn.classList.add('spotify-connected');
+            } else {
+                spotifyBtn.textContent = '🟢 Connect Spotify';
+            }
+        })
+        .catch(console.error);
+        
+    // Handle click
+    spotifyBtn.addEventListener('click', async () => {
+        document.getElementById('search-more-menu')?.classList.add('hidden');
+        
+        if (spotifyBtn.classList.contains('spotify-connected')) {
+            if (confirm('Disconnect from Spotify? This will re-enable 100-track limits on playlist imports.')) {
+                try {
+                    await fetch('/api/spotify/disconnect', { method: 'POST' });
+                    spotifyBtn.textContent = '🟢 Connect Spotify';
+                    spotifyBtn.classList.remove('spotify-connected');
+                    showToast('Disconnected from Spotify');
+                } catch (e) {
+                    showToast('Error disconnecting');
+                }
+            }
+        } else {
+            // Redirect to login
+            window.location.href = '/api/spotify/login';
+        }
+    });
+})();

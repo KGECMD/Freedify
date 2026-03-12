@@ -49,3 +49,7 @@ Thumbs.db
 # Secrets (if any)
 secrets.json
 *.key
+freedify_settings.json
+
+# Tests
+test_*.py

@@ -8,6 +8,10 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
+# Load .env file for local development (Docker uses docker-compose env_file instead)
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, Query, Response, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
@@ -55,6 +59,25 @@ import time
 _stream_url_cache: dict = {}
 STREAM_CACHE_TTL = 1800  # 30 minutes
 
+async def keep_awake_ping():
+    """Background task to ping the server and prevent Render spin-down."""
+    import httpx
+    # Render sets RENDER_EXTERNAL_URL automatically, so we can use it to ping ourselves
+    target_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8000")
+    ping_url = f"{target_url}/api/health"
+    
+    # 13 minutes = 780 seconds
+    interval = 13 * 60
+    
+    async with httpx.AsyncClient() as client:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                response = await client.get(ping_url)
+                logger.debug(f"Auto-ping {ping_url}: {response.status_code}")
+            except Exception as e:
+                logger.warning(f"Auto-ping failed: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -72,10 +95,14 @@ async def lifespan(app: FastAPI):
     # Start periodic cleanup task
     cleanup_task = asyncio.create_task(periodic_cleanup(30))
     
+    # Start auto-ping task to prevent Render spin-down
+    ping_task = asyncio.create_task(keep_awake_ping())
+    
     yield
     
     # Cleanup on shutdown
     cleanup_task.cancel()
+    ping_task.cancel()
     await deezer_service.close()
     await live_show_service.close()
     await spotify_service.close()
@@ -131,6 +158,66 @@ async def get_config():
     return {
         "google_client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
     }
+
+# ========== SPOTIFY OAUTH ENDPOINTS ==========
+
+@app.get("/api/spotify/login")
+async def spotify_login(request: Request):
+    """Redirect user to Spotify OAuth login."""
+    # Build redirect URI based on the incoming request host
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.url.netloc)
+    
+    # Spotify strictly blocks 'localhost' over HTTP, but allows '127.0.0.1'
+    if host.startswith("localhost"):
+        host = host.replace("localhost", "127.0.0.1")
+        
+    redirect_uri = f"{scheme}://{host}/api/spotify/callback"
+    
+    url = spotify_service.get_oauth_url(redirect_uri)
+    if not url:
+        raise HTTPException(status_code=500, detail="Spotify Client ID missing in .env")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url)
+
+@app.get("/api/spotify/callback")
+async def spotify_callback(request: Request, code: str = None, error: str = None):
+    """Handle the Spotify OAuth callback and exchange code for tokens."""
+    if error:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/?spotify_error=" + error)
+        
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+        
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.url.netloc)
+    
+    if host.startswith("localhost"):
+        host = host.replace("localhost", "127.0.0.1")
+        
+    redirect_uri = f"{scheme}://{host}/api/spotify/callback"
+    
+    success = await spotify_service.exchange_oauth_code(code, redirect_uri)
+    from fastapi.responses import RedirectResponse
+    # Redirect user back to wherever they were, or root
+    if success:
+        return RedirectResponse(url="/?spotify_connected=true")
+    else:
+        return RedirectResponse(url="/?spotify_error=exchange_failed")
+
+@app.get("/api/spotify/status")
+async def spotify_status():
+    """Check if the user has connected their Spotify account."""
+    is_connected = spotify_service.has_user_token()
+    return {"connected": is_connected}
+
+@app.post("/api/spotify/disconnect")
+async def spotify_disconnect():
+    """Disconnect the user's Spotify account by clearing tokens."""
+    spotify_service.clear_user_token()
+    return {"status": "disconnected"}
+
 
 @app.get("/api/search")
 async def search(

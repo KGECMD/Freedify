@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - **Playlist Management**: Added ♡ "Add All to Playlist" and per-track ♡ "Add to Playlist" buttons to the playlist detail view.
+- **Render Keep-Alive**: Added an automatic background ping task to the FastAPI lifespan that pings the application's `RENDER_EXTERNAL_URL` every 13 minutes, preventing free-tier servers from spinning down due to inactivity.
 - **Spotify Embed Scraping Fallback**: When the Spotify API returns a 403 Forbidden error for public playlists or albums, Freedify now seamlessly falls back to scraping track data directly from Spotify's embed pages.
 - **Deezer Album Art Enrichment**: Songs imported via the Spotify embed fallback now use concurrent Deezer searches to automatically fetch and attach the correct high-quality album artwork for each individual track instead of reusing the playlist cover.
 
