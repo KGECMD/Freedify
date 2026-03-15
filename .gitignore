@@ -53,3 +53,8 @@ freedify_settings.json
 
 # Tests
 test_*.py
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
