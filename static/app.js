@@ -39,7 +39,8 @@ const state = {
     podcastHistory: JSON.parse(localStorage.getItem('freedify_podcast_history') || '[]'), // Recently played episodes
     audiobookHistory: JSON.parse(localStorage.getItem('freedify_audiobook_history') || '[]'), // Recently played audiobook chapters
     podcastTags: JSON.parse(localStorage.getItem('freedify_podcast_tags') || '{}'), // {podcastId: ['tag1','tag2']}
-    lastSavedPositionTime: 0 // In-memory tracker for resume saves
+    lastSavedPositionTime: 0, // In-memory tracker for resume saves
+    watchedPlaylists: JSON.parse(localStorage.getItem('freedify_watched') || '[]') // Watched Spotify playlists
 };
 
 // One-time migration: move audiobook entries from podcastHistory to audiobookHistory
@@ -530,6 +531,124 @@ function deletePlaylist(playlistId) {
     renderPlaylistsView();
 }
 
+// ========== WATCHED PLAYLISTS ==========
+function saveWatchedPlaylists() {
+    localStorage.setItem('freedify_watched', JSON.stringify(state.watchedPlaylists));
+}
+
+function watchPlaylist(spotifyId, name, coverArt, tracks) {
+    // Check if already watched
+    if (state.watchedPlaylists.some(w => w.spotifyId === spotifyId)) {
+        showToast(`Already watching "${name}"`);
+        return;
+    }
+    
+    // Build track hashes for diffing
+    const trackHashes = new Set();
+    tracks.forEach(t => {
+        const key = `${(t.artists || '').toLowerCase()}|||${(t.name || '').toLowerCase()}`;
+        trackHashes.add(key);
+    });
+    
+    state.watchedPlaylists.push({
+        spotifyId: spotifyId,
+        name: name,
+        coverArt: coverArt || '/static/icon.svg',
+        trackCount: tracks.length,
+        trackHashes: Array.from(trackHashes),
+        lastSynced: new Date().toISOString(),
+        newTracks: 0
+    });
+    
+    saveWatchedPlaylists();
+    showToast(`👁 Now watching "${name}" — you'll be notified of new tracks!`);
+}
+
+function unwatchPlaylist(spotifyId) {
+    const wp = state.watchedPlaylists.find(w => w.spotifyId === spotifyId);
+    state.watchedPlaylists = state.watchedPlaylists.filter(w => w.spotifyId !== spotifyId);
+    saveWatchedPlaylists();
+    if (wp) showToast(`Stopped watching "${wp.name}"`);
+    renderPlaylistsView();
+}
+
+function isWatchedPlaylist(spotifyId) {
+    return state.watchedPlaylists.some(w => w.spotifyId === spotifyId);
+}
+
+async function syncOneWatchedPlaylist(watched) {
+    const url = `https://open.spotify.com/playlist/${watched.spotifyId}`;
+    try {
+        const response = await fetch(`/api/search?q=${encodeURIComponent(url)}&type=playlist`);
+        const data = await response.json();
+        if (!response.ok || !data.tracks) return null;
+        
+        // Build current track hashes
+        const currentHashes = new Set();
+        data.tracks.forEach(t => {
+            const key = `${(t.artists || '').toLowerCase()}|||${(t.name || '').toLowerCase()}`;
+            currentHashes.add(key);
+        });
+        
+        // Diff against stored hashes
+        const oldHashes = new Set(watched.trackHashes || []);
+        const newTrackKeys = [];
+        currentHashes.forEach(key => {
+            if (!oldHashes.has(key)) newTrackKeys.push(key);
+        });
+        
+        // Update stored data
+        watched.trackHashes = Array.from(currentHashes);
+        watched.trackCount = data.tracks.length;
+        watched.lastSynced = new Date().toISOString();
+        watched.newTracks = newTrackKeys.length;
+        if (data.results && data.results[0]) {
+            watched.name = data.results[0].name || watched.name;
+            watched.coverArt = data.results[0].album_art || data.results[0].image || watched.coverArt;
+        }
+        
+        return { watched, newCount: newTrackKeys.length, playlistName: watched.name };
+    } catch (e) {
+        console.warn(`Failed to sync watched playlist ${watched.name}:`, e);
+        return null;
+    }
+}
+
+async function syncAllWatchedPlaylists(showProgress = true) {
+    if (state.watchedPlaylists.length === 0) return;
+    
+    if (showProgress) showToast('🔄 Syncing watched playlists...');
+    
+    let totalNew = 0;
+    const updates = [];
+    
+    for (const watched of state.watchedPlaylists) {
+        const result = await syncOneWatchedPlaylist(watched);
+        if (result && result.newCount > 0) {
+            totalNew += result.newCount;
+            updates.push(`${result.newCount} new in "${result.playlistName}"`);
+        }
+    }
+    
+    saveWatchedPlaylists();
+    
+    if (totalNew > 0) {
+        showToast(`🎵 ${totalNew} new track${totalNew !== 1 ? 's' : ''} found! ${updates.join(', ')}`);
+    } else if (showProgress) {
+        showToast('✓ All watched playlists are up to date');
+    }
+    
+    // Refresh playlists view if currently on it
+    if (state.searchType === 'favorites') {
+        renderPlaylistsView();
+    }
+}
+
+// Auto-sync watched playlists on page load (delayed so app loads fast)
+setTimeout(() => {
+    syncAllWatchedPlaylists(false).catch(e => console.warn('Auto-sync failed:', e));
+}, 5000);
+
 // ========== LISTENING HISTORY ==========
 function saveHistory() {
     localStorage.setItem('freedify_history', JSON.stringify(state.history));
@@ -930,6 +1049,40 @@ function renderPlaylistsView() {
         `;
     });
     
+    // Build watched playlists section
+    let watchedHtml = '';
+    if (state.watchedPlaylists.length > 0) {
+        watchedHtml = `
+            <div class="playlists-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2>👁 Watched Playlists</h2>
+                <button id="sync-all-watched-btn" class="btn-secondary" style="padding: 6px 14px; font-size: 0.85em;">🔄 Sync All</button>
+            </div>
+            <div class="results-grid watched-grid" style="margin-bottom: 32px;">
+                ${state.watchedPlaylists.map(w => {
+                    const timeSince = w.lastSynced ? getTimeSince(w.lastSynced) : 'never';
+                    return `
+                    <div class="album-item watched-item" data-spotify-id="${w.spotifyId}">
+                        <div class="album-art-container">
+                            <img src="${w.coverArt || '/static/icon.svg'}" alt="${escapeHtml(w.name)}" class="album-art" loading="lazy">
+                            <div class="album-overlay">
+                                <button class="play-album-btn">▶</button>
+                            </div>
+                            ${w.newTracks > 0 ? `<span class="watched-badge">${w.newTracks} new</span>` : ''}
+                        </div>
+                        <div class="album-info">
+                            <div class="album-name">${escapeHtml(w.name)}</div>
+                            <div class="album-artist">${w.trackCount} tracks · synced ${timeSince}</div>
+                        </div>
+                        <div class="watched-actions">
+                            <button class="sync-watched-btn" title="Sync now">🔄</button>
+                            <button class="unwatch-btn" title="Stop watching">✕</button>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+        `;
+    }
+    
     const headerHtml = `
         <div class="playlists-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <h2>Your Playlists</h2>
@@ -940,8 +1093,57 @@ function renderPlaylistsView() {
         </div>
     `;
     
-    resultsContainer.innerHTML = headerHtml;
+    resultsContainer.innerHTML = watchedHtml + headerHtml;
     resultsContainer.appendChild(grid);
+    
+    // Bind Sync All button
+    const syncAllBtn = document.getElementById('sync-all-watched-btn');
+    if (syncAllBtn) {
+        syncAllBtn.addEventListener('click', async () => {
+            syncAllBtn.disabled = true;
+            syncAllBtn.textContent = '⏳ Syncing...';
+            await syncAllWatchedPlaylists(true);
+            syncAllBtn.disabled = false;
+            syncAllBtn.textContent = '🔄 Sync All';
+        });
+    }
+    
+    // Bind watched playlist click handlers
+    resultsContainer.querySelectorAll('.watched-item').forEach(el => {
+        el.addEventListener('click', async (e) => {
+            if (e.target.closest('.unwatch-btn')) {
+                e.stopPropagation();
+                unwatchPlaylist(el.dataset.spotifyId);
+                return;
+            }
+            if (e.target.closest('.sync-watched-btn')) {
+                e.stopPropagation();
+                const watched = state.watchedPlaylists.find(w => w.spotifyId === el.dataset.spotifyId);
+                if (watched) {
+                    showToast(`🔄 Syncing "${watched.name}"...`);
+                    await syncOneWatchedPlaylist(watched);
+                    saveWatchedPlaylists();
+                    renderPlaylistsView();
+                    showToast(`✓ "${watched.name}" synced (${watched.trackCount} tracks)`);
+                }
+                return;
+            }
+            // Click on the card itself — open the playlist
+            const spotifyUrl = `https://open.spotify.com/playlist/${el.dataset.spotifyId}`;
+            showLoading('Loading watched playlist...');
+            try {
+                const response = await fetch(`/api/search?q=${encodeURIComponent(spotifyUrl)}&type=playlist`);
+                const data = await response.json();
+                hideLoading();
+                if (data.tracks && data.results && data.results[0]) {
+                    showDetailView(data.results[0], data.tracks);
+                }
+            } catch (err) {
+                hideLoading();
+                showToast('Failed to load playlist');
+            }
+        });
+    });
     
     // Bind import button
     const importBtn = document.getElementById('import-playlist-btn');
@@ -973,6 +1175,21 @@ function renderPlaylistsView() {
             }
         });
     });
+}
+
+// Helper: get time since a date as a human-readable string
+function getTimeSince(dateStr) {
+    const now = new Date();
+    const then = new Date(dateStr);
+    const diffMs = now - then;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return `${Math.floor(diffDay / 7)}w ago`;
 }
 
 // ========== MY PODCASTS PAGE ==========
@@ -2774,6 +2991,11 @@ function showDetailView(item, tracks) {
                 <button class="detail-add-playlist-btn" title="Add all to playlist">
                     ♡ Add All to Playlist
                 </button>
+                ${(item.type === 'playlist' && item.source === 'spotify' && item.id && !item.is_user_playlist) ? `
+                <button class="detail-watch-btn ${isWatchedPlaylist(item.id) ? 'watched' : ''}" title="${isWatchedPlaylist(item.id) ? 'Stop watching this playlist' : 'Watch for new tracks'}">
+                    ${isWatchedPlaylist(item.id) ? '👁 Watching ✓' : '👁 Watch Playlist'}
+                </button>
+                ` : ''}
             </div>
         </div>
     `;
@@ -2801,6 +3023,24 @@ function showDetailView(item, tracks) {
         addPlaylistBtn.addEventListener('click', () => {
             if (typeof openAddToPlaylistModal === 'function') {
                 openAddToPlaylistModal(tracks);
+            }
+        });
+    }
+    
+    // Wire up Watch Playlist button
+    const watchBtn = detailInfo.querySelector('.detail-watch-btn');
+    if (watchBtn && item.id) {
+        watchBtn.addEventListener('click', () => {
+            if (isWatchedPlaylist(item.id)) {
+                unwatchPlaylist(item.id);
+                watchBtn.textContent = '👁 Watch Playlist';
+                watchBtn.classList.remove('watched');
+                watchBtn.title = 'Watch for new tracks';
+            } else {
+                watchPlaylist(item.id, item.name, image, tracks);
+                watchBtn.textContent = '👁 Watching ✓';
+                watchBtn.classList.add('watched');
+                watchBtn.title = 'Stop watching this playlist';
             }
         });
     }

@@ -792,7 +792,54 @@ class SpotifyService:
                 except Exception as e:
                     logger.warning(f"Batch track lookup failed: {e}")
             
-            # Step 5: Add source attribution
+            # Step 5: Browser scrape fallback for large playlists (100+ tracks)
+            # If we still don't have all the tracks, or if exactly 100 tracks were found
+            # (hitting the initial Spotify pagination limit), use headless Selenium to scroll
+            # through the full Spotify playlist page and extract all track data.
+            total_expected = playlist.get("total_tracks", 0) or len(tracks)
+            if len(tracks) < total_expected or len(tracks) == 100:
+                logger.info(f"Have {len(tracks)}/{total_expected} tracks (or exactly 100). Launching browser scrape fallback...")
+                try:
+                    browser_tracks = await self._scrape_playlist_via_browser(playlist_id)
+                    if browser_tracks:
+                        # Build a set of existing track names for dedup
+                        existing_keys = set()
+                        for t in tracks:
+                            key = f"{t.get('artists', '')}|||{t.get('name', '')}".lower()
+                            existing_keys.add(key)
+                        
+                        new_count = 0
+                        for bt in browser_tracks:
+                            key = f"{bt['artists']}|||{bt['name']}".lower()
+                            if key not in existing_keys:
+                                # Create a track entry from browser data
+                                import hashlib
+                                track_hash = hashlib.md5(f"{bt['artists']}-{bt['name']}".encode()).hexdigest()[:12]
+                                tracks.append({
+                                    "id": f"browser_{track_hash}",
+                                    "type": "track",
+                                    "name": bt["name"],
+                                    "artists": bt["artists"],
+                                    "artist_names": [a.strip() for a in bt["artists"].split(",")],
+                                    "album": "",
+                                    "album_id": "",
+                                    "album_art": playlist.get("album_art", ""),
+                                    "duration_ms": 0,
+                                    "duration": "0:00",
+                                    "isrc": None,
+                                    "source": "spotify",
+                                })
+                                existing_keys.add(key)
+                                new_count += 1
+                        
+                        logger.info(f"Browser scrape added {new_count} new tracks (total: {len(tracks)})")
+                        # Mark all browser-scraped tracks for art enrichment
+                        if new_count > 0:
+                            embed_tracks.extend(tracks[-new_count:])
+                except Exception as e:
+                    logger.warning(f"Browser scrape fallback failed: {e}")
+            
+            # Step 6: Add source attribution
             for track in tracks:
                 track["source"] = "spotify"
             
@@ -809,6 +856,163 @@ class SpotifyService:
         except Exception as e:
             logger.error(f"Error fetching Spotify playlist {playlist_id}: {e}")
             return None
+    
+    async def _scrape_playlist_via_browser(self, playlist_id: str) -> list:
+        """Scrape ALL tracks from a Spotify playlist using headless Selenium.
+        
+        Spotify's web UI uses virtualised scrolling — tracks are lazy-loaded as 
+        you scroll. This method launches a headless Chrome, navigates to the 
+        playlist, and scrolls through the entire tracklist, extracting track 
+        data incrementally from [data-testid="tracklist-row"] elements.
+        
+        Adapted from MusicGrabber's Playwright approach, using our existing 
+        Selenium infrastructure (same as AudiobookBay).
+        
+        Returns list of {"name": ..., "artists": ...} dicts.
+        """
+        import asyncio
+        import time
+        
+        def _browser_scrape(playlist_id: str) -> list:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.chrome.service import Service
+            from selenium.webdriver.common.by import By
+            import shutil
+            
+            options = Options()
+            options.add_argument('--headless=new')
+            options.add_argument('--window-size=1280,800')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+            
+            # Try system Chromium first (Docker/Render), fall back to webdriver-manager
+            chromium_path = shutil.which('chromium') or shutil.which('chromium-browser')
+            chromedriver_path = shutil.which('chromedriver')
+            
+            if chromium_path and chromedriver_path:
+                options.binary_location = chromium_path
+                service = Service(chromedriver_path)
+            else:
+                from webdriver_manager.chrome import ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+            
+            driver = webdriver.Chrome(service=service, options=options)
+            try:
+                url = f"https://open.spotify.com/playlist/{playlist_id}"
+                logger.info(f"Browser scrape: navigating to {url}")
+                driver.set_page_load_timeout(60)
+                driver.get(url)
+                time.sleep(3)
+                
+                # Dismiss cookie consent if present
+                cookie_selectors = [
+                    "[data-testid='cookie-policy-manage-dialog-accept-button']",
+                    "button.onetrust-close-btn-handler",
+                ]
+                for sel in cookie_selectors:
+                    try:
+                        btns = driver.find_elements(By.CSS_SELECTOR, sel)
+                        if btns:
+                            btns[0].click()
+                            logger.info(f"Browser scrape: dismissed cookie dialog")
+                            time.sleep(2)
+                            break
+                    except Exception:
+                        pass
+                
+                # Wait for tracklist rows to appear
+                SELECTOR = '[data-testid="tracklist-row"]'
+                for _ in range(30):  # Wait up to 30 seconds
+                    rows = driver.find_elements(By.CSS_SELECTOR, SELECTOR)
+                    if rows:
+                        break
+                    time.sleep(1)
+                
+                if not rows:
+                    logger.warning("Browser scrape: no tracklist rows found")
+                    return []
+                
+                # Scroll through the virtualised tracklist, extracting tracks incrementally
+                seen_tracks = {}  # Use dict to preserve order and deduplicate
+                stale_count = 0
+                last_seen_count = 0
+                
+                def extract_visible_tracks():
+                    for row in driver.find_elements(By.CSS_SELECTOR, SELECTOR):
+                        try:
+                            text = row.text.strip()
+                            parts = [p.strip() for p in text.split('\n') if p.strip()]
+                            
+                            # Only extract numbered tracks (skip "Recommended" section)
+                            if not parts or not parts[0].isdigit():
+                                continue
+                            
+                            # Skip the track number
+                            parts = parts[1:]
+                            
+                            # Skip "E" (Explicit) marker
+                            if parts and parts[0] == "E":
+                                parts = parts[1:]
+                            
+                            if len(parts) >= 2:
+                                track_name = parts[0].strip()
+                                artist = parts[1].strip()
+                                # Sometimes "E" appears as second element
+                                if artist == "E" and len(parts) >= 3:
+                                    artist = parts[2].strip()
+                                
+                                if track_name and artist and artist != "E":
+                                    key = f"{artist}|||{track_name}".lower()
+                                    if key not in seen_tracks:
+                                        seen_tracks[key] = {
+                                            "name": track_name,
+                                            "artists": artist
+                                        }
+                        except Exception:
+                            continue
+                
+                # First extraction before scrolling
+                extract_visible_tracks()
+                logger.info(f"Browser scrape: initial extraction found {len(seen_tracks)} tracks")
+                
+                # Scroll to load all tracks
+                while stale_count < 20:
+                    rows = driver.find_elements(By.CSS_SELECTOR, SELECTOR)
+                    if rows:
+                        # Scroll the last row into view
+                        driver.execute_script("arguments[0].scrollIntoView({block: 'end'});", rows[-1])
+                    time.sleep(0.3)
+                    
+                    extract_visible_tracks()
+                    
+                    if len(seen_tracks) == last_seen_count:
+                        stale_count += 1
+                    else:
+                        stale_count = 0
+                        last_seen_count = len(seen_tracks)
+                        if last_seen_count % 50 == 0:
+                            logger.info(f"Browser scrape: {last_seen_count} tracks loaded so far...")
+                
+                logger.info(f"Browser scrape: finished with {len(seen_tracks)} tracks")
+                return list(seen_tracks.values())
+            
+            finally:
+                driver.quit()
+        
+        # Run the blocking Selenium work in a thread executor
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(None, _browser_scrape, playlist_id)
+            return result
+        except Exception as e:
+            logger.error(f"Browser scrape failed: {e}")
+            return []
     
     async def _scrape_embed_playlist(self, playlist_id: str) -> Optional[Dict[str, Any]]:
         """Scrape playlist data from Spotify embed page as fallback when API returns 403."""

@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Spotify Embed Scraping Fallback**: When the Spotify API returns a 403 Forbidden error for public playlists or albums, Freedify now seamlessly falls back to scraping track data directly from Spotify's embed pages.
 - **Deezer Album Art Enrichment**: Songs imported via the Spotify embed fallback now use concurrent Deezer searches to automatically fetch and attach the correct high-quality album artwork for each individual track instead of reusing the playlist cover.
 - **Premiumize CDN Auto-Refresh**: When a cached Premiumize audiobook/file CDN link expires (403 Forbidden), the server now automatically searches Premiumize cloud for the file by name, fetches a fresh download link, and retries the stream — completely transparent to the user.
+- **Headless Browser Playlist Scraping**: For Spotify playlists with 100+ tracks, Freedify now automatically falls back to a headless Selenium browser that scrolls through the full playlist page to extract all tracks — bypassing Spotify's API/embed 100-track limit. Inspired by MusicGrabber's approach, reuses existing Selenium infrastructure.
+- **Watched Spotify Playlists**: You can now "👁 Watch" Spotify playlists. Every time you open Freedify, it will check your watched playlists in the background and notify you if any new tracks have been added. Find your watched playlists and their sync status at the top of the Playlists tab.
 
 ### Fixed
 - **Spotify Token Retrieval Dead Code**: Removed unreachable auth code in the Spotify integration service that prevented fallback token acquisition strategies.
