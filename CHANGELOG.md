@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.4.2] - 2026-03-24
+
+### Fixed
+- **SoundCloud silent playback**: SoundCloud tracks looked like they were playing (timer advancing) but produced no audio. Two root causes fixed:
+  1. `_get_stream_url` (backend) now scans yt-dlp's `formats[]` list to prefer non-HLS progressive HTTP streams. SoundCloud often returns HLS (m3u8) as the "best" format; proxying an m3u8 playlist file to the browser `<audio>` element plays silently because the browser receives playlist text, not audio segments.
+  2. `handleEQResume` (frontend) now calls `audioContext.resume()` immediately after `initEqualizer()` creates a new context. The AudioContext may start in `suspended` state when created after an `async`/`await` break in the user gesture chain (browser autoplay policy), causing the Web Audio graph to route audio to silence even though the player timer advances.
+
+---
+
 ## [1.4.1] - 2026-03-24
 
 ### Changed

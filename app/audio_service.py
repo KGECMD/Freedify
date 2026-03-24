@@ -287,16 +287,38 @@ class AudioService:
             else:
                 del self._stream_url_cache[url]
         
-        # Use yt-dlp for page URLs (YouTube, Bandcamp, etc.)
+        # Use yt-dlp for page URLs (YouTube, Bandcamp, SoundCloud, etc.)
         info = self._extract_info_safe(url)
         if not info: return None
         if 'entries' in info: info = info['entries'][0]
-        
-        stream_url = info.get('url')
+
+        # Prefer non-HLS progressive HTTP streams for browser compatibility.
+        # HLS (m3u8) URLs cannot be proxied directly — the browser receives the
+        # playlist text, not audio segments, and plays silently or errors.
+        stream_url = None
+        formats = info.get('formats', [])
+        if formats:
+            # Audio-only non-HLS formats, sorted by bitrate descending
+            http_audio = [
+                f for f in formats
+                if f.get('url')
+                and f.get('protocol', 'http') not in ('m3u8', 'm3u8_native')
+                and (f.get('vcodec') in (None, 'none') or f.get('acodec') not in (None, 'none'))
+                and f.get('acodec') not in (None, 'none')
+            ]
+            if http_audio:
+                http_audio.sort(key=lambda f: f.get('abr') or f.get('tbr') or 0, reverse=True)
+                stream_url = http_audio[0].get('url')
+                logger.info(f"Selected non-HLS audio format: {http_audio[0].get('format_id')} @ {http_audio[0].get('abr')}kbps")
+
+        if not stream_url:
+            # Fallback: use yt-dlp's selected format (may be HLS)
+            stream_url = info.get('url')
+
         if stream_url:
-            # Cache for 1 hour (Google URLs usually expire in ~4-6 hours)
+            # Cache for 1 hour (CDN URLs typically expire in ~4-6 hours)
             self._stream_url_cache[url] = (stream_url, now + 3600)
-            
+
         return stream_url
 
 

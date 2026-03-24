@@ -304,6 +304,12 @@ volumeBoostSlider?.addEventListener('input', () => {
 export function handleEQResume() {
     if (!audio.audioContext) {
         initEqualizer();
+        // initEqualizer may create a suspended context (browser autoplay policy
+        // blocks AudioContext creation after an async break in the user gesture
+        // chain). Resume immediately so audio isn't silenced.
+        if (audio.audioContext && audio.audioContext.state === 'suspended') {
+            audio.audioContext.resume().catch(() => {});
+        }
     } else if (audio.audioContext.state === 'suspended') {
         audio.audioContext.resume();
     }
