@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.4.3] - 2026-03-25
+
+### Added
+- **Mood-Based Discovery** — AI Radio now accepts mood context (Focus, Workout, Chill, Party, Late Night, Commute) plus free-form mood descriptions
+- Mood selector UI with predefined buttons and free-form text input
+- Mood taxonomy tracking: tracks played >75% are liked, skipped <50% are disliked per mood
+- Rolling 7-day mood usage stats shown on each mood button
+- Collapsible mood history panel showing top moods this week
+- Mood data syncs to Google Drive alongside playlists and library
+- Mood preferences persist across sessions and survive page reloads
+- Gemini fallback: if mood-enhanced AI Radio fails, retries without mood context
+
+---
+
 ## [1.4.2] - 2026-03-24
 
 ### Fixed
