@@ -357,6 +357,21 @@ export function renderMoodSelector(containerEl) {
                     value="${isFreeform ? escapedMood : ''}" />
             </div>
             ${state.currentMood ? `<div class="mood-active-label">AI Radio — Mood: ${escapedMood}</div>` : ''}
+            <div class="mood-history-panel">
+                <button class="mood-history-toggle" onclick="this.parentElement.classList.toggle('expanded')">
+                    Top Moods This Week ▾
+                </button>
+                <div class="mood-history-content">
+                    ${(() => {
+                        const allStats = MOOD_LIST.map(m => ({ mood: m, count: getMoodStatsForWeek(m) }))
+                            .filter(s => s.count > 0)
+                            .sort((a, b) => b.count - a.count)
+                            .slice(0, 3);
+                        if (allStats.length === 0) return '<p class="mood-empty">No mood data yet. Start listening!</p>';
+                        return allStats.map(s => `<div class="mood-stat-row">${s.mood}: ${s.count} plays</div>`).join('');
+                    })()}
+                </div>
+            </div>
         </div>
     `;
 
