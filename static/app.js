@@ -52,6 +52,10 @@ import {
     initVisualizer, initConcertAlerts, showArtistBio,
     visualizerActive, showVisualizerInfoBriefly,
 } from './dj.js';
+import {
+    initSync, enableSync, disableSync, connectSync,
+    sendFullState, sendDelta, sendTimeUpdate, discoverDevices,
+} from './sync.js';
 
 // ========== WIRE PLAYBACK DEPENDENCIES ==========
 // Break circular deps by passing function refs to playback module
@@ -116,6 +120,31 @@ on('moodChanged', (mood) => {
         state.queue.splice(state.currentIndex + 1); // Clear upcoming tracks
         checkAndAddTracks(); // Re-fetch with new mood context
     }
+});
+
+// Cross-device sync events
+on('enableSync', (url) => enableSync(url));
+on('disableSync', () => disableSync());
+on('syncDiscoverDevices', async () => {
+    const devices = await discoverDevices();
+    emit('syncDevicesFound', devices);
+});
+
+// Send sync deltas on local state changes
+on('trackStarted', () => {
+    if (state.syncEnabled) sendDelta({ currentIndex: state.currentIndex, isPlaying: true, currentTime: 0 });
+});
+on('playStateChanged', (isPlaying) => {
+    if (state.syncEnabled) sendDelta({ isPlaying });
+});
+on('queueChanged', () => {
+    if (state.syncEnabled) sendFullState();
+});
+on('repeatModeChanged', (mode) => {
+    if (state.syncEnabled) sendDelta({ repeatMode: mode });
+});
+on('volumeChanged', (vol) => {
+    if (state.syncEnabled) sendDelta({ volume: vol });
 });
 
 // ========== GLOBAL CLICK DELEGATION ==========
@@ -262,6 +291,7 @@ window.openAddToPlaylistModal = openAddToPlaylistModal;
 window.showPodcastModal = showPodcastModal;
 window.openAlbum = openAlbum;
 window.openAudiobook = openAudiobook;
+window.connectSyncDevice = (url) => { enableSync(url); };
 window.openArtist = openArtist;
 window.addToQueue = addToQueue;
 window.performSearch = performSearch;
@@ -337,3 +367,4 @@ initConcertAlerts();
 initAIRadio();
 initAIAssistant();
 initSpotifyOAuth();
+initSync();
