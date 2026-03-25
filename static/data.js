@@ -529,3 +529,73 @@ export function getAllUsedTags() {
     Object.values(state.podcastTags).forEach(arr => arr.forEach(t => tags.add(t)));
     return [...tags].sort();
 }
+
+// ========== MOOD TRACKING ==========
+const PREDEFINED_MOODS = ['Focus', 'Workout', 'Chill', 'Party', 'Late Night', 'Commute'];
+const MAX_MOOD_HISTORY = 500;
+const MAX_MOOD_PREF_PER_LIST = 50;
+
+export function saveMoodEvent(mood, track, percentage) {
+    if (!mood || !track || !track.id) return;
+    if (!isFinite(percentage) || percentage < 0) return;
+
+    // Log to moodHistory (all moods including free-form)
+    state.moodHistory.unshift({
+        mood,
+        trackId: track.id,
+        trackName: track.name || 'Unknown',
+        trackArtist: track.artists || 'Unknown',
+        timestamp: Date.now(),
+        percentage
+    });
+    // Prune to cap (front-push / tail-splice)
+    if (state.moodHistory.length > MAX_MOOD_HISTORY) {
+        state.moodHistory.splice(MAX_MOOD_HISTORY);
+    }
+    localStorage.setItem('freedify_mood_history', JSON.stringify(state.moodHistory));
+
+    // Only update moodPreferences for predefined moods
+    if (!PREDEFINED_MOODS.includes(mood)) return;
+    if (!state.moodPreferences[mood]) return;
+
+    const trackObj = { id: track.id, name: track.name || 'Unknown', artist: track.artists || 'Unknown' };
+
+    if (percentage >= 0.75) {
+        // Liked — remove from disliked first if present
+        const dislikedIdx = state.moodPreferences[mood].disliked.findIndex(t => t.id === track.id);
+        if (dislikedIdx !== -1) state.moodPreferences[mood].disliked.splice(dislikedIdx, 1);
+        // Deduplicate
+        if (!state.moodPreferences[mood].liked.find(t => t.id === track.id)) {
+            state.moodPreferences[mood].liked.unshift(trackObj);
+            if (state.moodPreferences[mood].liked.length > MAX_MOOD_PREF_PER_LIST) {
+                state.moodPreferences[mood].liked.splice(MAX_MOOD_PREF_PER_LIST);
+            }
+        }
+    } else if (percentage < 0.50) {
+        // Disliked — remove from liked first if present
+        const likedIdx = state.moodPreferences[mood].liked.findIndex(t => t.id === track.id);
+        if (likedIdx !== -1) state.moodPreferences[mood].liked.splice(likedIdx, 1);
+        // Deduplicate
+        if (!state.moodPreferences[mood].disliked.find(t => t.id === track.id)) {
+            state.moodPreferences[mood].disliked.unshift(trackObj);
+            if (state.moodPreferences[mood].disliked.length > MAX_MOOD_PREF_PER_LIST) {
+                state.moodPreferences[mood].disliked.splice(MAX_MOOD_PREF_PER_LIST);
+            }
+        }
+    }
+    // 50-75% is neutral — no logging to preferences
+
+    localStorage.setItem('freedify_mood_preferences', JSON.stringify(state.moodPreferences));
+}
+
+export function getMoodPreferences(mood) {
+    if (!mood || !state.moodPreferences[mood]) return { liked: [], disliked: [] };
+    return state.moodPreferences[mood];
+}
+
+export function getMoodStatsForWeek(mood) {
+    const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    return state.moodHistory.filter(
+        entry => entry.mood === mood && entry.timestamp >= oneWeekAgo
+    ).length;
+}
