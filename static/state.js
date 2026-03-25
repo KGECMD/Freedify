@@ -51,7 +51,17 @@ export const state = {
     audiobookHistory: safeLoad('freedify_audiobook_history', []),
     podcastTags: safeLoad('freedify_podcast_tags', {}),
     lastSavedPositionTime: 0, // In-memory tracker for resume saves
-    watchedPlaylists: safeLoad('freedify_watched', [])
+    watchedPlaylists: safeLoad('freedify_watched', []),
+    currentMood: safeLoad('freedify_current_mood', null),
+    moodHistory: safeLoad('freedify_mood_history', []),
+    moodPreferences: safeLoad('freedify_mood_preferences', {
+        Focus: { liked: [], disliked: [] },
+        Workout: { liked: [], disliked: [] },
+        Chill: { liked: [], disliked: [] },
+        Party: { liked: [], disliked: [] },
+        "Late Night": { liked: [], disliked: [] },
+        Commute: { liked: [], disliked: [] }
+    }),
 };
 
 // One-time migration: move audiobook entries from podcastHistory to audiobookHistory
@@ -64,5 +74,25 @@ export const state = {
         state.podcastHistory = state.podcastHistory.filter(e => e.source !== 'audiobook');
         localStorage.setItem('freedify_podcast_history', JSON.stringify(state.podcastHistory));
         localStorage.setItem('freedify_audiobook_history', JSON.stringify(state.audiobookHistory));
+    }
+})();
+
+// One-time migration: initialize all three mood keys if absent
+(function initMoodDefaults() {
+    if (!localStorage.getItem('freedify_mood_preferences')) {
+        localStorage.setItem('freedify_mood_preferences', JSON.stringify({
+            Focus: { liked: [], disliked: [] },
+            Workout: { liked: [], disliked: [] },
+            Chill: { liked: [], disliked: [] },
+            Party: { liked: [], disliked: [] },
+            "Late Night": { liked: [], disliked: [] },
+            Commute: { liked: [], disliked: [] }
+        }));
+    }
+    if (!localStorage.getItem('freedify_mood_history')) {
+        localStorage.setItem('freedify_mood_history', JSON.stringify([]));
+    }
+    if (!localStorage.getItem('freedify_current_mood')) {
+        localStorage.setItem('freedify_current_mood', JSON.stringify(null));
     }
 })();
