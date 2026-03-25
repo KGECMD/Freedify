@@ -9,6 +9,7 @@ import { showToast, escapeHtml, formatTime } from './utils.js';
 import { $, $$, audioPlayer, audioPlayer2, domState, searchInput, resultsContainer, resultsSection, detailView, queueSection, volumeSlider } from './dom.js';
 import { showLoading, hideLoading, showError, renderMoodSelector } from './ui.js';
 import { audio, getActivePlayer } from './audio-engine.js';
+import { enableSync, disableSync, discoverDevices } from './sync.js';
 import { savePlaylists, createPlaylist, addToPlaylist, saveLibrary, saveHistory,
          savePodcastFavorites, saveAudiobookFavorites, savePodcastPlayed,
          savePodcastResumePositions, savePodcastHistory, saveAudiobookHistory,
@@ -1985,6 +1986,119 @@ function initSpotifyOAuth() {
             window.location.href = '/api/spotify/login';
         }
     });
+}
+
+// ========== CROSS-DEVICE SYNC UI ==========
+
+let syncPanelEl = null;
+
+export function initSyncUI() {
+    // Create the sync panel in the More menu or settings area
+    const moreMenu = document.querySelector('.more-menu') || document.querySelector('#settings-panel');
+    if (!moreMenu) return;
+
+    syncPanelEl = document.createElement('div');
+    syncPanelEl.id = 'sync-panel';
+    syncPanelEl.className = 'sync-panel hidden';
+    syncPanelEl.innerHTML = `
+        <div class="sync-header">
+            <span>Sync Devices</span>
+            <label class="sync-toggle-label">
+                <input type="checkbox" id="sync-toggle" ${state.syncEnabled ? 'checked' : ''} />
+                <span class="sync-toggle-text">${state.syncEnabled ? 'ON' : 'OFF'}</span>
+            </label>
+        </div>
+        <div class="sync-devices-list" id="sync-devices-list">
+            <p class="sync-hint">Toggle on to discover devices</p>
+        </div>
+        <div class="sync-manual">
+            <input type="text" id="sync-manual-ip" placeholder="Enter IP (e.g., 192.168.1.100:8000)"
+                value="${localStorage.getItem('freedify_sync_last_ip') || ''}" />
+            <button id="sync-manual-connect">Connect</button>
+        </div>
+    `;
+
+    // Insert into More menu
+    moreMenu.appendChild(syncPanelEl);
+
+    // Toggle handler
+    const toggle = syncPanelEl.querySelector('#sync-toggle');
+    toggle.addEventListener('change', async () => {
+        if (toggle.checked) {
+            // Try mDNS discovery first
+            const devices = await discoverDevices();
+            renderDeviceList(devices);
+            if (devices.length > 0) {
+                enableSync(`http://${devices[0].ip}:${devices[0].port}`);
+            } else {
+                // Fall back to manual IP
+                const lastIp = localStorage.getItem('freedify_sync_last_ip');
+                if (lastIp) {
+                    enableSync(lastIp);
+                } else {
+                    showToast('No devices found. Enter IP manually.');
+                }
+            }
+            syncPanelEl.querySelector('.sync-toggle-text').textContent = 'ON';
+        } else {
+            disableSync();
+            syncPanelEl.querySelector('.sync-toggle-text').textContent = 'OFF';
+        }
+    });
+
+    // Manual connect handler
+    syncPanelEl.querySelector('#sync-manual-connect').addEventListener('click', () => {
+        const ip = syncPanelEl.querySelector('#sync-manual-ip').value.trim();
+        if (!ip) return;
+        const url = ip.startsWith('http') ? ip : `http://${ip}`;
+        enableSync(url);
+    });
+
+    // Listen for status changes
+    on('syncStatusChanged', (status) => {
+        updateSyncIndicator(status);
+    });
+}
+
+function renderDeviceList(devices) {
+    const list = document.getElementById('sync-devices-list');
+    if (!list) return;
+    if (devices.length === 0) {
+        list.innerHTML = '<p class="sync-hint">No devices found. Try manual IP.</p>';
+        return;
+    }
+    // escapeHtml on mDNS-provided values to prevent injection (CLAUDE.md rule)
+    list.innerHTML = devices.map(d => `
+        <div class="sync-device" onclick="window.connectSyncDevice('http://${escapeHtml(d.ip)}:${escapeHtml(String(d.port))}')">
+            <span class="sync-device-name">${escapeHtml(d.name)}</span>
+            <span class="sync-device-ip">${escapeHtml(d.ip)}:${escapeHtml(String(d.port))}</span>
+        </div>
+    `).join('');
+}
+
+function updateSyncIndicator(status) {
+    let indicator = document.getElementById('sync-indicator');
+    if (!indicator) {
+        // Create indicator in player bar
+        const playerBar = document.querySelector('.player-controls') || document.querySelector('.player-bar');
+        if (!playerBar) return;
+        indicator = document.createElement('span');
+        indicator.id = 'sync-indicator';
+        indicator.title = 'Cross-Device Sync';
+        playerBar.appendChild(indicator);
+    }
+
+    if (status === 'connected') {
+        indicator.textContent = '\u{1F517}';
+        indicator.style.display = 'inline';
+        indicator.title = 'Synced';
+    } else if (status === 'connecting') {
+        indicator.textContent = '\u23F3';
+        indicator.style.display = 'inline';
+        indicator.title = 'Connecting...';
+    } else {
+        indicator.style.display = 'none';
+    }
 }
 
 // ========== EXPORTS ==========

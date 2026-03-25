@@ -46,6 +46,7 @@ import {
     updateMiniPlayer, toggleMiniPlayer, openAddToPlaylistModal,
     renderRecommendations, initLocalFiles, initGoogleDriveSync,
     initSpotifyOAuth, initAIRadio, initAIAssistant, checkAndAddTracks,
+    initSyncUI,
 } from './integrations.js';
 import {
     initDJMode, fetchAudioFeaturesForTracks, renderDJBadgeForTrack,
@@ -368,3 +369,4 @@ initAIRadio();
 initAIAssistant();
 initSpotifyOAuth();
 initSync();
+initSyncUI();
