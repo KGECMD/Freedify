@@ -17,6 +17,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mood data syncs to Google Drive alongside playlists and library
 - Mood preferences persist across sessions and survive page reloads
 - Gemini fallback: if mood-enhanced AI Radio fails, retries without mood context
+- **Cross-Device Queue Sync** — Real-time playback sync across devices on same network
+- mDNS auto-discovery of Freedify instances on local network
+- Manual IP entry for Tailscale or cross-network setups
+- WebSocket relay for instant state propagation (queue, track, position, volume, repeat mode)
+- Sync toggle (off by default) — saves memory when not in use
+- Volume syncs with 200ms ramp to prevent audio jumps
+- Crossfade-aware sync that defers track changes during transitions
+- Sync indicator in player bar showing connection status
+- Automatic reconnection with exponential backoff (3 retries)
 
 ---
 
