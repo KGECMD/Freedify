@@ -45,7 +45,7 @@ import {
     updateMediaSession, submitNowPlaying, submitScrobble,
     updateMiniPlayer, toggleMiniPlayer, openAddToPlaylistModal,
     renderRecommendations, initLocalFiles, initGoogleDriveSync,
-    initSpotifyOAuth, initAIRadio, initAIAssistant,
+    initSpotifyOAuth, initAIRadio, initAIAssistant, checkAndAddTracks,
 } from './integrations.js';
 import {
     initDJMode, fetchAudioFeaturesForTracks, renderDJBadgeForTrack,
@@ -109,6 +109,13 @@ on('openDownloadModal', ({ tracks, isBatch }) => {
 on('addToQueue', (track) => addToQueue(track));
 on('trackStarted', (track) => {
     // Hook for AI Radio and other listeners
+});
+on('moodChanged', (mood) => {
+    // If AI Radio is active, re-generate queue with new mood
+    if (state.aiRadioActive) {
+        state.queue.splice(state.currentIndex + 1); // Clear upcoming tracks
+        checkAndAddTracks(); // Re-fetch with new mood context
+    }
 });
 
 // ========== GLOBAL CLICK DELEGATION ==========

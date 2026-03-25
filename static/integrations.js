@@ -7,7 +7,7 @@ import { state } from './state.js';
 import { emit, on } from './event-bus.js';
 import { showToast, escapeHtml, formatTime } from './utils.js';
 import { $, $$, audioPlayer, audioPlayer2, domState, searchInput, resultsContainer, resultsSection, detailView, queueSection, volumeSlider } from './dom.js';
-import { showLoading, hideLoading, showError } from './ui.js';
+import { showLoading, hideLoading, showError, renderMoodSelector } from './ui.js';
 import { audio, getActivePlayer } from './audio-engine.js';
 import { savePlaylists, createPlaylist, addToPlaylist, saveLibrary, saveHistory,
          savePodcastFavorites, saveAudiobookFavorites, savePodcastPlayed,
@@ -917,6 +917,18 @@ function initAIRadio() {
         });
     } else {
         console.error('AI Radio button not found! #ai-radio-btn');
+    }
+
+    // Insert mood selector container before the AI Radio toggle area
+    const moreMenu = document.getElementById('player-more-menu');
+    if (moreMenu) {
+        let moodContainer = document.getElementById('mood-selector-container');
+        if (!moodContainer) {
+            moodContainer = document.createElement('div');
+            moodContainer.id = 'mood-selector-container';
+            moreMenu.appendChild(moodContainer);
+        }
+        renderMoodSelector(moodContainer);
     }
 
     // Hook into track end
@@ -1961,5 +1973,6 @@ export {
     initGoogleDriveSync,
     initSpotifyOAuth,
     initAIRadio,
-    initAIAssistant
+    initAIAssistant,
+    checkAndAddTracks
 };
