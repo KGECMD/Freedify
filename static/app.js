@@ -60,7 +60,7 @@ import {
 } from './sync.js';
 import {
     initCloudSync, cloudLogin, cloudSignup, cloudLogout,
-    pullAll, pushAll, isCloudLoggedIn,
+    pullAll, pushAll, isCloudLoggedIn, getCloudEmail,
 } from './cloud-sync.js';
 
 // ========== WIRE PLAYBACK DEPENDENCIES ==========
@@ -406,6 +406,7 @@ window.isCloudLoggedIn = isCloudLoggedIn;
     const logoutBtn = document.getElementById('cloud-logout-btn');
     const syncNowBtn = document.getElementById('cloud-sync-now-btn');
     const pushAllBtn = document.getElementById('cloud-push-all-btn');
+    const accountEmail = document.getElementById('cloud-account-email');
 
     if (!authForm || !loggedInPanel) return;
 
@@ -413,6 +414,7 @@ window.isCloudLoggedIn = isCloudLoggedIn;
         if (isCloudLoggedIn()) {
             authForm.classList.add('hidden');
             loggedInPanel.classList.remove('hidden');
+            if (accountEmail) accountEmail.textContent = getCloudEmail() || '';
         } else {
             authForm.classList.remove('hidden');
             loggedInPanel.classList.add('hidden');
@@ -501,14 +503,14 @@ window.isCloudLoggedIn = isCloudLoggedIn;
         statusBadge.className = 'cloud-status-badge';
         switch (status) {
             case 'syncing':
-                statusBadge.textContent = '● Syncing...';
+                statusBadge.textContent = 'Syncing...';
                 statusBadge.classList.add('syncing');
                 break;
             case 'synced':
-                statusBadge.textContent = '● Synced';
+                statusBadge.textContent = 'Synced';
                 break;
             case 'error':
-                statusBadge.textContent = '● Error';
+                statusBadge.textContent = 'Error';
                 statusBadge.classList.add('error');
                 break;
             case 'logged_out':

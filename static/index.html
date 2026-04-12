@@ -103,13 +103,14 @@
                             </div>
                             <!-- Logged-in state -->
                             <div id="cloud-logged-in" class="hidden">
-                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                                    <span id="cloud-sync-status" class="cloud-status-badge">● Synced</span>
-                                    <button class="settings-item" id="cloud-logout-btn" style="font-size: 0.8rem; padding: 4px 12px;">Log Out</button>
+                                <div class="cloud-account-email" id="cloud-account-email"></div>
+                                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                                    <span id="cloud-sync-status" class="cloud-status-badge">Synced</span>
+                                    <button class="settings-item cloud-btn-logout" id="cloud-logout-btn">Log Out</button>
                                 </div>
                                 <div style="display: flex; gap: 8px;">
-                                    <button class="settings-item" id="cloud-sync-now-btn" style="flex: 1;">Sync Now</button>
-                                    <button class="settings-item" id="cloud-push-all-btn" style="flex: 1; opacity: 0.7;">Push All</button>
+                                    <button class="settings-item cloud-btn-sync" id="cloud-sync-now-btn">Sync Now</button>
+                                    <button class="settings-item cloud-btn-push" id="cloud-push-all-btn">Push All</button>
                                 </div>
                             </div>
                         </div>

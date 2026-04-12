@@ -28,6 +28,15 @@ const SYNC_MAP = {
 
 let _token = localStorage.getItem('freedify_cloud_token');
 let _userId = localStorage.getItem('freedify_cloud_user_id');
+let _email = localStorage.getItem('freedify_cloud_email') || _decodeEmailFromToken(_token);
+
+function _decodeEmailFromToken(token) {
+    if (!token) return null;
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        return payload.email || null;
+    } catch { return null; }
+}
 
 // ========== PUSH (debounced, per-key) ==========
 const _pendingPushes = new Set();
@@ -117,8 +126,10 @@ export async function cloudLogin(email, password) {
         const result = await resp.json();
         _token = result.access_token;
         _userId = result.user_id;
+        _email = email;
         localStorage.setItem('freedify_cloud_token', _token);
         localStorage.setItem('freedify_cloud_user_id', _userId);
+        localStorage.setItem('freedify_cloud_email', _email);
         _updateUI('syncing');
         return result;
     } catch (e) {
@@ -142,8 +153,10 @@ export async function cloudSignup(email, password) {
         if (result.access_token) {
             _token = result.access_token;
             _userId = result.user_id;
+            _email = email;
             localStorage.setItem('freedify_cloud_token', _token);
             localStorage.setItem('freedify_cloud_user_id', _userId);
+            localStorage.setItem('freedify_cloud_email', _email);
             _updateUI('syncing');
         }
         return result;
@@ -153,11 +166,17 @@ export async function cloudSignup(email, password) {
     }
 }
 
+export function getCloudEmail() {
+    return _email;
+}
+
 export function cloudLogout() {
     _token = null;
     _userId = null;
+    _email = null;
     localStorage.removeItem('freedify_cloud_token');
     localStorage.removeItem('freedify_cloud_user_id');
+    localStorage.removeItem('freedify_cloud_email');
     _pendingPushes.clear();
     clearTimeout(_pushDebounce);
     _updateUI('logged_out');
