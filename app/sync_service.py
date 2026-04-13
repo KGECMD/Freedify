@@ -57,7 +57,8 @@ class SyncService:
         """Synchronous inner — must be run in executor from async context."""
         if self._zeroconf:
             try:
-                self._zeroconf.unregister_all()
+                if self._info:
+                    self._zeroconf.unregister_service(self._info)
                 self._zeroconf.close()
             except Exception as e:
                 logger.warning(f"mDNS cleanup error: {e}")

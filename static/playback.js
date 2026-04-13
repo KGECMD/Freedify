@@ -437,6 +437,20 @@ export async function loadTrack(track) {
         audio.consecutiveFailures = 0;
 
         if (hideLoading) hideLoading();
+
+        // Apply playback speed & pitch preservation BEFORE play starts,
+        // so the time-stretching algorithm is active from the very first
+        // audio sample routed through the Web Audio graph.  Without this,
+        // the player briefly runs at 1.0× through the EQ filter chain and
+        // then abruptly jumps to the target rate, causing crackling.
+        if (track.source === 'podcast' || track.source === 'audiobook') {
+            player.preservesPitch = true;
+            player.playbackRate = state.playbackSpeed;
+        } else {
+            player.preservesPitch = true;
+            player.playbackRate = 1.0;
+        }
+
         player.play();
         state.isPlaying = true;
         updatePlayButton();
